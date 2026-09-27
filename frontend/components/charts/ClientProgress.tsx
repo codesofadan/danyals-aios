@@ -19,11 +19,25 @@ export default function ClientProgress({ clients }: { clients: CCClientPoint[] }
     const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
 
     const anims: anime.AnimeInstance[] = [];
-    root.querySelectorAll<SVGCircleElement>(".ring").forEach((_, idx) => {
-      const ring = root.querySelectorAll<HTMLElement>(".ring")[idx];
-      const prog = ring.querySelector<SVGCircleElement>(".prog")!;
-      const pv = ring.querySelector<HTMLElement>(".pv")!;
-      const p = clients[idx].p;
+    // THE PERCENTAGE COMES OFF THE ELEMENT, not from `clients[idx]`.
+    //
+    // This used to walk the rendered rings and read `clients[idx]` at the same
+    // position, which assumes the DOM holds exactly one ring per client in order.
+    // It did not: the list was keyed by `c.cn`, and two clients may share a name
+    // (this database has ninety called "Brand Kit Test", and two franchises of one
+    // brand is a perfectly ordinary real case). React drops a duplicate-keyed child,
+    // so the DOM was SHORTER than `clients` and every ring after the first collision
+    // animated a different client's number — under the correct client's name, with
+    // nothing on screen to suggest it. The same mismatch made `clients[idx].p` throw
+    // outright whenever the array shrank before the effect re-ran.
+    //
+    // Reading `data-p` off the ring being animated makes that misalignment
+    // structurally impossible: the value and the element cannot come apart.
+    root.querySelectorAll<HTMLElement>(".ring").forEach((ring, idx) => {
+      const prog = ring.querySelector<SVGCircleElement>(".prog");
+      const pv = ring.querySelector<HTMLElement>(".pv");
+      if (!prog || !pv) return;
+      const p = Number(ring.dataset.p ?? 0);
       const offset = CIRC * (1 - p / 100);
       if (reduce) {
         prog.style.strokeDashoffset = String(offset);
@@ -48,8 +62,12 @@ export default function ClientProgress({ clients }: { clients: CCClientPoint[] }
       </div>
 
       <div className="rings" ref={rootRef}>
-        {clients.map((c) => (
-          <div className="ring" key={c.cn}>
+        {/* Keyed by POSITION, not by name. `cn` is not unique — the payload carries no
+            id, and a name collision silently deleted rings. This list is a snapshot
+            replaced wholesale, with no reordering and no per-item state to preserve,
+            which is the case where an index key is the correct one. */}
+        {clients.map((c, idx) => (
+          <div className="ring" key={idx} data-p={c.p}>
             <div className="dial">
               <svg width="104" height="104" viewBox="0 0 104 104">
                 <circle className="track" cx="52" cy="52" r={R} />

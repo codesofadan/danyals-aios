@@ -8,7 +8,7 @@ reference (``PAGE-TEMPLATES.md``) must equal the module's rendering.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import get_args
+from typing import Any, ClassVar, get_args
 
 import pytest
 
@@ -30,13 +30,19 @@ pytestmark = pytest.mark.unit
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _REFERENCE = _REPO_ROOT / ".claude" / "skills" / "_shared" / "reference" / "PAGE-TEMPLATES.md"
 
-_EXPECTED = {"service", "location", "service_area", "blog", "faq", "local", "homepage"}
+_EXPECTED = {
+    "service", "location", "service_area", "blog", "faq", "local", "homepage",
+    # An ABOUT page is a layout, not an article, and it was the one page type with no
+    # wireframe of its own - so every "about us" page fell back to the blog template
+    # and published as a wall of prose with a hero on top.
+    "about",
+}
 
 
-def test_exactly_the_seven_named_templates() -> None:
+def test_exactly_the_eight_named_templates() -> None:
     assert set(TEMPLATES) == _EXPECTED
     assert set(template_names()) == _EXPECTED
-    assert len(template_names()) == 7
+    assert len(template_names()) == 8
 
 
 @pytest.mark.parametrize("name", sorted(_EXPECTED))
@@ -67,29 +73,91 @@ def test_page_template_literal_matches_module() -> None:
 # The resolver precedence: MEASURED design -> template -> thin section_order ->
 # default -> nothing.
 # --------------------------------------------------------------------------- #
-def test_the_measured_blueprint_wins_over_a_template() -> None:
-    """The client's captured design is what pages are built to.
+_MEASURED = [
+    {"kind": "hero", "layout": "split"},
+    {"kind": "services", "layout": "grid"},
+    {"kind": "proof", "layout": "carousel"},
+    {"kind": "faq", "layout": "accordion"},
+    {"kind": "cta", "layout": "banner"},
+]
 
-    This was the reverse until 2026-09-17, and the consequence was total: the
-    content flow sends a template on EVERY launch, so the "explicit template"
-    tier matched every job and a client's analyzed design never shaped a single
-    page. Re-inject by moving the ``get_template`` check back above the analyzed
-    blueprint and this fails.
+
+def test_the_measured_blueprint_wins_over_a_template_for_its_own_page_type() -> None:
+    """The client's captured design is what pages OF THAT KIND are built to.
+
+    Two decisions are pinned here, and they are not in tension.
+
+    The measurement outranks the template (2026-09-17). Before that it was the
+    reverse, and the consequence was total: the content flow sends a template on
+    EVERY launch, so the "explicit template" tier matched every job and a client's
+    analyzed design never shaped a single page. Re-inject by moving the
+    ``get_template`` check back above the measured blueprint and this fails.
+
+    And the measurement applies to the page type it was MEASURED ON (0154). A capture
+    measures one page; a homepage's hero/services-grid/stats order is a correct
+    homepage and a wrong blog post. So the profile has to say which type it measured -
+    here, ``blog`` - for its sequence to be used on a blog page.
     """
-    profile = {
-        "layout": {
-            "blueprint": [
-                {"kind": "hero", "layout": "split"},
-                {"kind": "services", "layout": "grid"},
-                {"kind": "proof", "layout": "carousel"},
-                {"kind": "faq", "layout": "accordion"},
-                {"kind": "cta", "layout": "banner"},
-            ]
-        }
-    }
+    profile = {"layout": {"blueprint": _MEASURED, "source_page_type": "blog"}}
     specs = resolve_blueprint(design_profile=profile, template="faq", page_type="blog")
     assert [s.kind for s in specs] == ["hero", "services", "proof", "faq", "cta"]
     assert [s.kind for s in specs] != [s.kind for s in TEMPLATES["faq"].sections]
+
+
+def test_a_blueprint_measured_on_another_page_type_does_not_shape_this_one() -> None:
+    """THE 0154 defect. A client whose captured page was their HOMEPAGE had the
+    homepage's section sequence used as the structure of their blog articles and
+    location pages - palette and typography transferred correctly, the structure did
+    not. A blog page now gets the audited blog template instead.
+
+    Re-inject by returning ``layout.blueprint`` from tier 1 regardless of type and
+    this fails.
+    """
+    profile = {"layout": {"blueprint": _MEASURED, "source_page_type": "homepage"}}
+    specs = resolve_blueprint(design_profile=profile, template=None, page_type="blog")
+    assert [s.kind for s in specs] == [s.kind for s in TEMPLATES["blog"].sections]
+
+
+def test_a_capture_that_never_said_what_it_measured_is_not_per_type_evidence() -> None:
+    """Empty is the safe answer, not a guess: an unkeyed sequence is never applied as
+    evidence about a page type, so a capture whose URL gave nothing away cannot
+    reshape the wrong pages."""
+    profile = {"layout": {"blueprint": _MEASURED}}
+    specs = resolve_blueprint(design_profile=profile, template=None, page_type="blog")
+    assert [s.kind for s in specs] == [s.kind for s in TEMPLATES["blog"].sections]
+
+
+def test_the_per_page_type_map_is_read_before_the_singular_blueprint() -> None:
+    """The kit accumulates a sequence per captured type (0154), so an operator can
+    capture the homepage and then the services page and have both used correctly."""
+    profile = {
+        "layout": {
+            "blueprint": _MEASURED,
+            "source_page_type": "homepage",
+            "blueprints": {
+                "service": [
+                    {"kind": "hero"}, {"kind": "services"}, {"kind": "pricing"},
+                    {"kind": "cta"},
+                ],
+            },
+        }
+    }
+    service = resolve_blueprint(design_profile=profile, template="faq", page_type="service")
+    assert [s.kind for s in service] == ["hero", "services", "pricing", "cta"]
+    # ...and the homepage capture still shapes a homepage.
+    home = resolve_blueprint(design_profile=profile, template=None, page_type="homepage")
+    assert [s.kind for s in home] == ["hero", "services", "proof", "faq", "cta"]
+
+
+def test_the_page_type_key_is_matched_case_and_separator_insensitively() -> None:
+    """These values arrive from a job row, a kit's JSON and an operator's wizard, and
+    those three have never agreed on case or on hyphen-vs-underscore."""
+    measured = [
+        {"kind": "hero"}, {"kind": "services"}, {"kind": "service_areas"}, {"kind": "cta"},
+    ]
+    profile = {"layout": {"blueprints": {"Service-Area": measured}}}
+    specs = resolve_blueprint(design_profile=profile, template=None, page_type="service_area")
+    assert [s.kind for s in specs] == ["hero", "services", "service_areas", "cta"]
 
 
 def test_five_measured_sections_resolve_to_exactly_five() -> None:
@@ -97,7 +165,7 @@ def test_five_measured_sections_resolve_to_exactly_five() -> None:
     five-section blueprint - not the template's count, not a truncation."""
     blueprint = [{"kind": k} for k in ("hero", "intro", "services", "proof", "cta")]
     specs = resolve_blueprint(
-        design_profile={"layout": {"blueprint": blueprint}},
+        design_profile={"layout": {"blueprint": blueprint, "source_page_type": "service"}},
         template="service",
         page_type="service",
     )
@@ -110,10 +178,13 @@ def test_measured_capacities_survive_the_resolver() -> None:
     dropped at the API wire model, so max_items was always 0 in production."""
     profile = {
         "layout": {
+            "source_page_type": "service",
             "blueprint": [
                 {"kind": "hero", "headingChars": 48, "bodyChars": 180},
                 {"kind": "services", "items": 3, "bodyChars": 320},
-            ]
+                {"kind": "faq", "items": 5},
+                {"kind": "cta"},
+            ],
         }
     }
     specs = resolve_blueprint(design_profile=profile, template=None, page_type="service")
@@ -133,22 +204,48 @@ def test_explicit_template_still_wins_over_a_thin_section_order() -> None:
 def test_analyzed_blueprint_used_when_no_template() -> None:
     profile = {
         "layout": {
+            "source_page_type": "service",
             "blueprint": [
                 {"kind": "hero", "layout": "split"},
                 {"kind": "services", "layout": "grid"},
+                {"kind": "faq", "layout": "accordion"},
                 {"kind": "cta", "layout": "banner"},
-            ]
+            ],
         }
     }
     specs = resolve_blueprint(design_profile=profile, template=None, page_type="service")
-    assert [s.kind for s in specs] == ["hero", "services", "cta"]
+    assert [s.kind for s in specs] == ["hero", "services", "faq", "cta"]
     assert specs[1].layout == "grid"
 
 
-def test_analyzed_section_order_used_when_no_rich_blueprint() -> None:
+def test_a_foreign_type_measurement_is_used_when_the_type_has_no_template() -> None:
+    """``gbp_post`` has no full-page template, so there is nothing better to fall back
+    to and the client's own measured sequence beats returning nothing. This is the one
+    tier where a foreign-type measurement is still the right answer."""
+    profile = {
+        "layout": {
+            "blueprint": [{"kind": "hero"}, {"kind": "cta"}],
+            "source_page_type": "homepage",
+        }
+    }
+    specs = resolve_blueprint(design_profile=profile, template=None, page_type="gbp_post")
+    assert [s.kind for s in specs] == ["hero", "cta"]
+
+
+def test_analyzed_section_order_used_when_the_page_type_has_no_template() -> None:
+    """A bare ``section_order`` is the THINNEST grounding there is - names with no
+    capacities and no page type - so it now sits below the page-type default
+    template. It is still used where no template exists (``gbp_post``), which is the
+    only place it is the best available answer."""
+    profile = {"layout": {"section_order": ["hero", "faq", "cta"]}}
+    specs = resolve_blueprint(design_profile=profile, template=None, page_type="gbp_post")
+    assert [s.kind for s in specs] == ["hero", "faq", "cta"]
+
+
+def test_the_page_type_template_outranks_a_thin_section_order() -> None:
     profile = {"layout": {"section_order": ["hero", "faq", "cta"]}}
     specs = resolve_blueprint(design_profile=profile, template=None, page_type="blog")
-    assert [s.kind for s in specs] == ["hero", "faq", "cta"]
+    assert [s.kind for s in specs] == [s.kind for s in TEMPLATES["blog"].sections]
 
 
 def test_page_type_default_when_no_template_or_profile() -> None:
@@ -283,3 +380,55 @@ class TestCapacity:
         these capacities:" followed by nothing would be worse than being told nothing."""
         from app.services.page_blueprints import SectionSpec, capacity_brief
         assert capacity_brief([SectionSpec(kind="hero"), SectionSpec(kind="cta")]) == ""
+
+
+# --------------------------------------------------------------------------- #
+# A FAILED CAPTURE IS NOT A DESIGN. Measured on hudamoji.pk: the analyzer read a page
+# builder's outer wrapper instead of the sections inside it and returned a homepage as
+# exactly two sections, hero + CTA. Nothing in the profile said the measurement had
+# failed, so it outranked the audited template and would have published two-section
+# pages for a client whose template calls for seven.
+# --------------------------------------------------------------------------- #
+class TestThinMeasurement:
+    _THIN: ClassVar[dict[str, Any]] = {
+        "layout": {
+            "source_page_type": "homepage",
+            "blueprint": [{"kind": "hero", "layout": "centered"},
+                          {"kind": "cta", "layout": "stacked"}],
+        }
+    }
+
+    def test_a_two_section_measurement_loses_to_the_template(self) -> None:
+        specs = resolve_blueprint(
+            design_profile=self._THIN, template=None, page_type="homepage"
+        )
+        assert [s.kind for s in specs] == [s.kind for s in TEMPLATES["homepage"].sections]
+
+    def test_the_same_thin_shape_under_the_per_type_map_also_loses(self) -> None:
+        profile = {"layout": {"blueprints": {"homepage": self._THIN["layout"]["blueprint"]}}}
+        specs = resolve_blueprint(
+            design_profile=profile, template=None, page_type="homepage"
+        )
+        assert len(specs) == 7
+
+    def test_a_four_section_measurement_is_believed(self) -> None:
+        """The bar is "could this plausibly be a page", not "is this a good page". A
+        client whose real design is thin must still get their own design."""
+        profile = {
+            "layout": {
+                "source_page_type": "homepage",
+                "blueprint": ["hero", "services", "testimonials", "cta"],
+            }
+        }
+        specs = resolve_blueprint(
+            design_profile=profile, template=None, page_type="homepage"
+        )
+        assert [s.kind for s in specs] == ["hero", "services", "testimonials", "cta"]
+
+    def test_a_thin_measurement_still_beats_nothing_when_no_template_exists(self) -> None:
+        """`gbp_post` has no template of its own, so the client's own site - thin or not -
+        is genuinely the best grounding available, and the fallback tiers keep it."""
+        specs = resolve_blueprint(
+            design_profile=self._THIN, template=None, page_type="gbp_post"
+        )
+        assert [s.kind for s in specs] == ["hero", "cta"]

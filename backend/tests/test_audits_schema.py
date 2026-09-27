@@ -62,6 +62,20 @@ def test_response_matches_auditrow_shape() -> None:
         # slug lives in its own registry (0126) - so it is null here and the
         # endpoints fill it in for a PUBLISHED page only.
         "publicUrl", "publicSlug",
+        # How often the public page has actually been opened, and when it was last
+        # read. A share link that nobody clicked and one a prospect read four times
+        # are different situations, and the difference only exists if it is counted.
+        "publicViews", "publicLastViewed",
+        # When the link stops working. A share that never expires is a permanent
+        # unauthenticated copy of a client's audit, so the expiry belongs beside the
+        # link everywhere the link appears.
+        "publicExpiresAt",
+        # WHETHER THE CRAWL ACTUALLY SAW THE SITE (0160), and what stopped it when it
+        # did not. A run that was blocked at the door still produces a report, and
+        # without this that report reads as a verdict on the site rather than on the
+        # crawl - the failure mode where a 12/100 means "we were served a challenge
+        # page", not "this site is broken".
+        "crawlVerdict", "crawlNote",
     }
     assert body["client"] == "NorthPeak Dental"
     assert body["tier"] == "Paid"  # stored 'paid' -> surfaced 'Paid'

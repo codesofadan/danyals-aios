@@ -27,6 +27,7 @@ import Link from "next/link";
 import { downloadFile, getReportHtml } from "@/lib/api";
 import ReportViewer from "@/components/report/ReportViewer";
 import AuditStats from "./AuditStats";
+import ReadinessBoard from "@/components/ops/ReadinessBoard";
 
 const STATUS_META: Record<JobStatus, { pill: string; label: string; icon: string }> = {
   queued: { pill: "mut", label: "Queued", icon: "schedule" },
@@ -256,6 +257,12 @@ export default function AuditWorkspace() {
         avgCostUsd={statsQ.data?.avgCostUsd ?? 0}
       />
 
+      {/* WHAT THIS DEPLOY WILL ACTUALLY MEASURE, before the operator buys a depth. The
+          audit engine reads its OWN .env, so a key that is green on the API-Management
+          screen can be absent from every audit - and a dimension that comes back
+          unmeasured looks identical to one that came back clean. */}
+      <ReadinessBoard group="Audit" title="Before you run an audit" />
+
       <div className="row">
         {/* Audit queue / history */}
         <section className="card">
@@ -411,6 +418,24 @@ export default function AuditWorkspace() {
                           {sm.label}
                         </span>
                         <div className="au-when au-runtime">{r.runtime}</div>
+                        {/* WHAT THE CRAWL ACTUALLY REACHED, on the row. A run that fetched
+                            one page of a twenty-page budget scores like a clean site,
+                            because the checks that never ran cannot fail - so a thin or
+                            blocked crawl has to be legible BEFORE anyone reads the score
+                            beside it. The verdict is the server's (audit_crawl_health);
+                            the note is only on the detail screen, where there is room. */}
+                        {r.crawlVerdict === "blocked" || r.crawlVerdict === "thin" ? (
+                          <span
+                            className={`status-pill ${r.crawlVerdict === "blocked" ? "crit" : "warn"}`}
+                            title={r.crawlNote || undefined}
+                            style={{ marginTop: 4 }}
+                          >
+                            <span className="material-symbols-rounded">
+                              {r.crawlVerdict === "blocked" ? "block" : "warning"}
+                            </span>
+                            {r.crawlVerdict === "blocked" ? "crawl blocked" : "thin crawl"}
+                          </span>
+                        ) : null}
                       </td>
                       <td className="num">
                         {r.score === null ? (

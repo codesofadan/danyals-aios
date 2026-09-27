@@ -110,6 +110,23 @@ class PortalRepo:
             cur.execute(query, params)
             return cur.fetchall()
 
+    def list_content_jobs(self, *, limit: int | None = None, offset: int = 0) -> _Rows:
+        """The caller's own content pages (newest first), through the client-safe view.
+
+        READ-ONLY BY CONSTRUCTION: ``portal_content_jobs`` (0156) is a view, so there is
+        no shape of request that could change a status from here. What the client sees is
+        the stage, whether it published and where - never the draft, the cost or the
+        internal quality score. Approval stays a lead action, by decision.
+        """
+        query = "select * from public.portal_content_jobs order by created_at desc"
+        params: list[Any] = []
+        if limit is not None:
+            query += " limit %s offset %s"
+            params += [limit, offset]
+        with rls_connection(self._user_id) as cur:
+            cur.execute(query, params)
+            return cur.fetchall()
+
     def granted_report_keys(self) -> list[str]:
         """The report keys the caller is granted (drives which vizzes are built)."""
         with rls_connection(self._user_id) as cur:

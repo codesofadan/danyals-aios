@@ -35,3 +35,7 @@ coverage.xml
 # It is now committed (R6-1), hashed by MANIFEST.json, and force-included into the
 # wheel. It IS part of the backend: the content pipeline reads it at runtime. Do not
 # re-add this rule.
+
+# Redis writes its snapshot to the process CWD. Starting redis-server from backend/
+# (rather than tools/redis/) drops a dump.rdb here - a runtime artefact, never source.
+*.rdb

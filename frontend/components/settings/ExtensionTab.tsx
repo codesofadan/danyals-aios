@@ -136,8 +136,7 @@ export default function ExtensionTab() {
           <div>
             <div className="ct">Install &amp; connect</div>
             <div className="cs">
-              The Citation Assistant lives in Chrome and works{" "}
-              <a className="op-url" href="/admin/citations/queue">the citation queue</a> from a
+              The Citation Assistant lives in Chrome and works the citation queue from a
               side panel beside each directory&apos;s form.
             </div>
           </div>

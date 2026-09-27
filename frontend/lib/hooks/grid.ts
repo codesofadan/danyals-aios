@@ -81,10 +81,60 @@ export type CreateGridInput = {
   /** Omit BOTH to resolve the centre from the client's own Google listing. */
   centerLat?: number;
   centerLng?: number;
+  /**
+   * A pasted Google Maps link. The HIGHEST-precedence centre — above typed
+   * coordinates, because the operator copied it off the listing instead of reading
+   * digits off a screen. Resolves the listing by place_id, so nothing is searched
+   * for by name and nothing can match the wrong business.
+   */
+  mapsUrl?: string;
+  /**
+   * Copy the resolved listing's name / address / phone onto the client's canonical
+   * NAP. Off unless the operator asked: that record is what the citations module
+   * submits to directories, so it is never overwritten as a side effect.
+   */
+  syncNap?: boolean;
   /** Only for a `rings` grid; a square grid ignores it. */
   rings?: number;
   ringSpacingKm: number;
 };
+
+/** What `POST /grid/maps-url/preview` returns (server-authoritative shape). */
+export type MapsUrlPreview = {
+  lat: number;
+  lng: number;
+  source: "places_details" | "places_biased" | "maps_pin" | "maps_viewport";
+  /** False only when the coordinate fell back to the link's panned-camera viewport. */
+  precise: boolean;
+  placeId: string;
+  cid: string;
+  name: string;
+  address: string;
+  city: string;
+  region: string;
+  postalCode: string;
+  phone: string;
+  website: string;
+  listingUrl: string;
+  /**
+   * Whether the BUSINESS was identified, as opposed to just the point. Gate the
+   * NAP-sync offer on this: false means the coordinates are good and the details
+   * are unknown, and unknown details must never reach the client's record.
+   */
+  identityVerified: boolean;
+  reason: string;
+};
+
+/**
+ * Resolve a pasted Maps link WITHOUT creating anything, so a human confirms the
+ * business before a grid is built on it.
+ */
+export function usePreviewMapsUrl() {
+  return useMutation({
+    mutationFn: (mapsUrl: string) =>
+      api.post<MapsUrlPreview>("/grid/maps-url/preview", { mapsUrl }),
+  });
+}
 
 export function useCreateGrid() {
   const qc = useQueryClient();

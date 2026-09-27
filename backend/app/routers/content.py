@@ -46,6 +46,9 @@ from app.logging_setup import get_logger
 from app.modules.content_planning.repo import ContentPlanningStore
 from app.schemas.content import (
     BrandKitApprovalResponse,
+    ContentBatchResponse,
+    ContentBatchResumeResponse,
+    ContentBatchUpdate,
     ContentBulkGenerateRequest,
     ContentBulkGenerateResponse,
     ContentJobCreate,
@@ -66,6 +69,14 @@ from app.schemas.content import (
     schema_for,
 )
 from app.services.activity import record_activity
+from app.services.content_collisions import (
+    Collision,
+    collision_detail,
+    find_collisions,
+    index_existing,
+)
+from app.services.content_collisions import normalise as normalise_term
+from app.services.content_flags import flags_payload
 from app.services.content_research import (
     build_recommend_gate,
     build_recommend_researcher,
@@ -83,6 +94,7 @@ from app.services.site_design import (
     analyze_website_design,
     build_design_gate,
     build_design_summarizer,
+    classify_captured_page_type,
     extract_site_design,
 )
 from app.services.site_navigation import navigation_pages_from_jobs
@@ -121,6 +133,9 @@ _RICH_COLUMNS: dict[str, str] = {
 _JOB_NOT_FOUND = HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Content job not found")
 _NOT_IN_REVIEW = HTTPException(
     status_code=status.HTTP_409_CONFLICT, detail="Content job is not awaiting review"
+)
+_BATCH_NOT_FOUND = HTTPException(
+    status_code=status.HTTP_404_NOT_FOUND, detail="Content batch not found"
 )
 _NOT_DONE = HTTPException(
     status_code=status.HTTP_409_CONFLICT,
@@ -218,6 +233,9 @@ def _seed_source_pack(
     testimonials: list[str] | None = None,
     unique_data: list[str] | None = None,
     services: list[str] | None = None,
+    pricing: list[str] | None = None,
+    team: list[str] | None = None,
+    service_areas: list[str] | None = None,
     design_profile: dict[str, Any] | None = None,
     template: str | None = None,
     primary_keyword: str = "",
@@ -273,6 +291,17 @@ def _seed_source_pack(
         pack["unique_data"] = data
     if svcs:
         pack["services"] = svcs
+    # Evidence for the three gated sections (pricing / team / service areas). Seeded
+    # verbatim like the four above, and under the EXACT keys
+    # ``content_pipeline.compose.evidence_available`` reads - a near-miss here is
+    # indistinguishable from the client having supplied nothing, and the only symptom
+    # would be a section quietly missing from the published page.
+    for _key, _value in (
+        ("pricing", pricing), ("team", team), ("service_areas", service_areas),
+    ):
+        _lines = _clean_lines(_value)
+        if _lines:
+            pack[_key] = _lines
     if template:
         # The operator EXPLICITLY chose a page-layout template - the worker's publish
         # path (``page_blueprints.resolve_blueprint``) builds the page to it and slots the
@@ -345,10 +374,14 @@ async def _seed_and_insert_job(
     testimonials: list[str] | None = None,
     unique_data: list[str] | None = None,
     services: list[str] | None = None,
+    pricing: list[str] | None = None,
+    team: list[str] | None = None,
+    service_areas: list[str] | None = None,
     design_profile: dict[str, Any] | None = None,
     template: str | None = None,
     primary_keyword: str = "",
     experience: dict[str, str] | None = None,
+    batch_id: str | None = None,
 ) -> dict[str, Any]:
     """Seed a job's ``source_pack``, insert the queued row (RLS path), enqueue the
     pipeline worker, and return the row. The shared create path behind BOTH
@@ -376,6 +409,9 @@ async def _seed_and_insert_job(
         testimonials=testimonials,
         unique_data=unique_data,
         services=services,
+        pricing=pricing,
+        team=team,
+        service_areas=service_areas,
         design_profile=design_profile,
         template=template,
         primary_keyword=primary_keyword,
@@ -396,6 +432,10 @@ async def _seed_and_insert_job(
             "schema_type": schema_for(page_type),
             "stage": "Queued",
             "source_pack": Jsonb(source_pack),
+            # The bulk build this job belongs to, or NULL for a single-job create (0157).
+            # Written here rather than in the fan-out loop so both create paths go through
+            # one insert and a batch can never be half-attached.
+            "batch_id": batch_id,
         },
     )
     enqueue(str(row["code"]))
@@ -508,6 +548,31 @@ async def save_page_model(
     return {"id": code, "saved": True}
 
 
+@router.get("/content/jobs/{code}/review-flags")
+async def get_review_flags(
+    code: str, repo: ContentRepoDep, _user: ViewReports
+) -> dict[str, Any]:
+    """The NAMED PROBLEMS in a draft - what the review screen shows instead of a score.
+
+    REGISTERED BEFORE THE CATCH-ALL BELOW, and that ordering is load-bearing: FastAPI
+    matches in declaration order, so ``/content/jobs/{code}/{column}`` would otherwise
+    swallow this path and 404 it as an unknown column. (Same trap the Experience routes
+    documented when they had to move out of this namespace entirely.)
+
+    The scorecard itself is unchanged and still readable at ``.../qa``; what changed is
+    which of it a reviewer is shown. The weighted total is provisional by its own
+    module's declaration - uncalibrated against ranking outcomes or a human grade - so it
+    is no longer put in front of the person approving. The deterministic detections
+    underneath it are not provisional, and those are what this returns.
+    """
+    row = await asyncio.to_thread(repo.get_job_by_code, code)
+    if row is None:
+        raise _JOB_NOT_FOUND
+    stored = row.get("qa_score")
+    payload = flags_payload(stored if isinstance(stored, dict) else {})
+    return {"id": str(row.get("code", code)), **payload}
+
+
 @router.get("/content/jobs/{code}/{column}")
 async def get_content_rich(code: str, column: str, repo: ContentRepoDep, _user: ViewReports) -> dict[str, Any]:
     """Rich retrieval (staff-only, NOT contract-locked): the server-only pipeline
@@ -551,6 +616,38 @@ async def preview_page_model(body: dict[str, Any], _user: ViewReports) -> dict[s
     return {"html": html}
 
 
+async def _guard_collisions(
+    repo: ContentRepo,
+    client_id: str,
+    wanted: list[tuple[str, str]],
+    *,
+    allow: bool,
+) -> list[Collision]:
+    """Refuse a create that would target a keyword this client already has a page for.
+
+    Returns the collisions when the caller explicitly allowed duplicates (so the endpoint
+    can record WHAT was overridden), and raises 409 with every clash named when it did not.
+
+    Never blocks on its own failure. The guard reads the client's existing jobs to answer a
+    question about money, not about safety - so if that read cannot be made, the create
+    proceeds. A guard that turns a database hiccup into "you cannot create content" would
+    cost more than the duplicate it was written to prevent.
+    """
+    if not wanted:
+        return []
+    try:
+        existing = await asyncio.to_thread(repo.keywords_in_use, client_id)
+    except Exception:
+        logger.warning("content_collision_check_unavailable", client_id=client_id)
+        return []
+    collisions = find_collisions(wanted, existing)
+    if collisions and not allow:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail=collision_detail(collisions)
+        )
+    return collisions
+
+
 # --------------------------------------------------------------------------- #
 # Create (queue + enqueue the pipeline worker)
 # --------------------------------------------------------------------------- #
@@ -574,6 +671,12 @@ async def create_content_job(
     if client is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Client not found")
 
+    # The collision guard runs BEFORE the insert, because after it the money is already
+    # committed: the row is queued and the worker starts researching.
+    overridden = await _guard_collisions(
+        repo, body.client_id, [("", body.topic)], allow=body.allow_duplicates
+    )
+
     row = await _seed_and_insert_job(
         repo,
         clients,
@@ -587,6 +690,9 @@ async def create_content_job(
         target=body.target,
         proof_points=body.proof_points,
         testimonials=body.testimonials,
+        pricing=body.pricing,
+        team=body.team,
+        service_areas=body.service_areas,
         unique_data=body.unique_data,
         services=body.services,
         design_profile=_design_dict(body.design_profile),
@@ -594,7 +700,14 @@ async def create_content_job(
         experience=body.experience,
     )
     await record_activity(
-        actor, kind="content", action="queued a content job", target=client.get("name", ""),
+        actor, kind="content",
+        action=(
+            "queued a content job (duplicate target allowed)" if overridden
+            else "queued a content job"
+        ),
+        target=client.get("name", ""),
+        # The override is only auditable if what was overridden is recorded with it.
+        meta=("; ".join(c.message for c in overridden) or None) if overridden else None,
         entity_type="client", entity_id=body.client_id,
     )
     return ContentJobResponse.from_row(row)
@@ -613,6 +726,7 @@ async def research_content(
     researcher: ResearchResearcherDep,
     gate: ResearchGateDep,
     clients: ClientsRepoDep,
+    repo: ContentRepoDep,
     _actor: PublishContent,
 ) -> ContentResearchResponse:
     """Recommend a set of pages to build for a site + content type (the "checkboxes").
@@ -679,7 +793,36 @@ async def research_content(
             reason=result.reason,
         )
 
-    return await asyncio.to_thread(_run)
+    out = await asyncio.to_thread(_run)
+
+    # MARK THE CLASHES BEFORE THE OPERATOR CHOOSES, not after they submit.
+    #
+    # `POST /content/research/generate` refuses a selection that duplicates a target this
+    # client already has, which is the control that actually protects the money. But
+    # meeting that refusal AFTER ticking twelve boxes is a bad way to learn it, so each
+    # recommendation carries its own clash here and the operator un-ticks it up front.
+    #
+    # Best-effort and never fatal: research already cost a paid call by this point, and
+    # losing that result to a failed local lookup would be the expensive mistake.
+    if body.client_id and out.items:
+        try:
+            existing = await asyncio.to_thread(repo.keywords_in_use, body.client_id)
+            index = index_existing(existing)
+            for item in out.items:
+                for term in (item.primary_keyword, item.title):
+                    hit = index.get(normalise_term(term))
+                    if hit:
+                        item.collision = Collision(
+                            term=term,
+                            code=str(hit["code"]),
+                            topic=str(hit["topic"]),
+                            status=str(hit["status"]),
+                            matched=str(hit["matched"]),
+                        ).message
+                        break
+        except Exception:
+            logger.warning("content_research_collision_mark_failed")
+    return out
 
 
 @router.post(
@@ -706,6 +849,44 @@ async def generate_from_research(
 
     design_profile = _design_dict(body.design_profile)  # shared across every fanned-out job
     template = None if body.template == "Auto" else body.template  # shared page-layout template
+
+    # THE COLLISION GUARD, over the WHOLE selection and before anything is created.
+    #
+    # All-or-nothing on purpose. Creating the eleven pages that are fine and refusing the
+    # one that clashes would leave the operator with a half-built batch and no obvious way
+    # to tell which pages made it - and the fan-out is one decision, so it gets one answer.
+    # It also catches two items in the SAME selection that target one term, which a
+    # per-item check made after the first insert could not see.
+    overridden = await _guard_collisions(
+        repo,
+        body.client_id,
+        [(item.primary_keyword or "", item.title) for item in body.items],
+        allow=body.allow_duplicates,
+    )
+
+    # THE BATCH HEADER (0157), created first so every job can point at it.
+    #
+    # Best-effort by design: if the header cannot be written, the fan-out still runs and
+    # the jobs are still queued - they simply arrive ungrouped, which is exactly what every
+    # fan-out did before batches existed. Losing the grouping is a lost convenience; losing
+    # the work the operator just asked for would not be.
+    batch_id: str | None = None
+    try:
+        batch = await asyncio.to_thread(
+            repo.create_batch,
+            {
+                "client_id": body.client_id,
+                "client_name": client.get("name", ""),
+                "label": body.label.strip(),
+                "content_type": body.content_type.strip(),
+                "cost_ceiling": body.cost_ceiling,
+                "created_by": actor.id,
+            },
+        )
+        batch_id = str(batch["id"])
+    except Exception:
+        logger.warning("content_batch_create_failed", client_id=body.client_id)
+
     codes: list[str] = []
     for item in body.items:
         row = await _seed_and_insert_job(
@@ -730,18 +911,171 @@ async def generate_from_research(
             design_profile=design_profile,
             template=template,
             experience=body.experience,
+            batch_id=batch_id,
         )
         codes.append(str(row["code"]))
 
     await record_activity(
         actor,
         kind="content",
-        action=f"bulk-generated {len(codes)} content pages",
+        action=(
+            f"bulk-generated {len(codes)} content pages"
+            + (" (duplicate targets allowed)" if overridden else "")
+        ),
         target=client.get("name", ""),
+        meta=("; ".join(c.message for c in overridden) or None) if overridden else None,
         entity_type="client",
         entity_id=body.client_id,
     )
-    return ContentBulkGenerateResponse(jobs=codes)
+    return ContentBulkGenerateResponse(jobs=codes, batch_id=batch_id or "")
+
+
+# --------------------------------------------------------------------------- #
+# Batches (0157): a bulk build as ONE thing - progress, a spend bound, and a resume.
+# --------------------------------------------------------------------------- #
+@router.get("/content/batches", response_model=list[ContentBatchResponse])
+async def list_content_batches(
+    repo: ContentRepoDep, page: PageDep, _user: ViewReports
+) -> list[ContentBatchResponse]:
+    """Every bulk build with its live progress, newest first.
+
+    The counts come from one grouped query rather than from loading each batch's jobs: a
+    progress view that fetches thirty rows per batch gets slow exactly when it is being
+    used. ``spent`` is summed from the jobs' own committed cost, so it cannot disagree with
+    what was actually charged.
+    """
+    rows = await asyncio.to_thread(repo.list_batches, limit=page.limit, offset=page.offset)
+    return [ContentBatchResponse.from_row(r) for r in rows]
+
+
+@router.get("/content/batches/{batch_id}")
+async def get_content_batch(
+    batch_id: str, repo: ContentRepoDep, _user: ViewReports
+) -> dict[str, Any]:
+    """One batch: its header, and every page in it with the stage and hold reason.
+
+    ``held`` is derived from what the worker actually writes when it degrades - a
+    ``drafting`` job whose stage begins "Held" - rather than from a second status column
+    that could disagree with it. One source of truth for "this stopped and here is why".
+    """
+    batch = await asyncio.to_thread(repo.get_batch, batch_id)
+    if batch is None:
+        raise _BATCH_NOT_FOUND
+    jobs = await asyncio.to_thread(repo.batch_jobs, batch_id)
+    spent = round(sum(float(j.get("cost") or 0) for j in jobs), 4)
+    ceiling = batch.get("cost_ceiling")
+    return {
+        "id": str(batch["id"]),
+        "label": str(batch.get("label") or ""),
+        "client": str(batch.get("client_name") or ""),
+        "contentType": str(batch.get("content_type") or ""),
+        "costCeiling": float(ceiling) if ceiling is not None else None,
+        "spent": spent,
+        "jobs": [
+            {
+                "code": str(j.get("code") or ""),
+                "topic": str(j.get("topic") or ""),
+                "pageType": str(j.get("page_type") or ""),
+                "status": str(j.get("status") or ""),
+                "stage": str(j.get("stage") or ""),
+                "cost": round(float(j.get("cost") or 0), 4),
+                "words": int(j.get("words") or 0),
+                "held": str(j.get("status") or "") == "drafting"
+                and str(j.get("stage") or "").startswith("Held"),
+            }
+            for j in jobs
+        ],
+    }
+
+
+@router.patch("/content/batches/{batch_id}", response_model=ContentBatchResponse)
+async def patch_content_batch(
+    batch_id: str, body: ContentBatchUpdate, repo: ContentRepoDep, actor: LeadOnly
+) -> ContentBatchResponse:
+    """Rename a batch, or change its spend ceiling (LEAD-only).
+
+    Raising the ceiling is the normal way to release a batch that stopped on it, which is
+    why this is a lead action and not an operator one: it authorises spend. Clearing the
+    bound needs its own flag, because ``costCeiling: null`` on the wire cannot be told
+    apart from "not supplied".
+    """
+    changes: dict[str, Any] = {}
+    if body.label is not None:
+        changes["label"] = body.label.strip()
+    if body.clear_ceiling:
+        changes["cost_ceiling"] = None
+    elif body.cost_ceiling is not None:
+        changes["cost_ceiling"] = body.cost_ceiling
+    if not changes:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Nothing to change"
+        )
+    row = await asyncio.to_thread(repo.update_batch, batch_id, changes)
+    if row is None:
+        raise _BATCH_NOT_FOUND
+    await record_activity(
+        actor, kind="content", action="changed a content batch",
+        target=str(row.get("label") or row.get("client_name") or ""),
+        entity_type="client" if row.get("client_id") else None,
+        entity_id=str(row["client_id"]) if row.get("client_id") else None,
+    )
+    # Re-read through the progress query so the response carries live counts, not the
+    # bare header row the update returned.
+    rows = await asyncio.to_thread(repo.list_batches, limit=200, offset=0)
+    fresh = next((r for r in rows if str(r.get("id")) == str(row["id"])), row)
+    return ContentBatchResponse.from_row(fresh)
+
+
+@router.post("/content/batches/{batch_id}/resume", response_model=ContentBatchResumeResponse)
+async def resume_content_batch(
+    batch_id: str,
+    repo: ContentRepoDep,
+    enqueue: ContentEnqueuerDep,
+    actor: LeadOnly,
+) -> ContentBatchResumeResponse:
+    """Re-queue every page in this batch that is HELD, and say what it left alone.
+
+    WHY A HELD JOB NEEDS THIS. A job blocked on budget, on a missing key or on the batch
+    ceiling degrades honestly: it holds at ``drafting`` with a "Held - ..." stage and an
+    unchanged $0 cost, deliberately NOT failed, because nothing is wrong with it. But a
+    held job is not queued, so nothing will ever pick it up again on its own. Before this,
+    the only way back was to know each code and re-enqueue it by hand.
+
+    It re-enqueues rather than re-creating: the same job row, the same grounding, the same
+    spend accounting. And it reports the pages it skipped, so an operator who expected
+    thirty resumes and got four can see why without reading a log.
+    """
+    batch = await asyncio.to_thread(repo.get_batch, batch_id)
+    if batch is None:
+        raise _BATCH_NOT_FOUND
+    jobs = await asyncio.to_thread(repo.batch_jobs, batch_id)
+    resumed: list[str] = []
+    skipped: list[str] = []
+    for job in jobs:
+        code = str(job.get("code") or "")
+        status_now = str(job.get("status") or "")
+        stage = str(job.get("stage") or "")
+        if status_now == "drafting" and stage.startswith("Held"):
+            enqueue(code)
+            resumed.append(code)
+        else:
+            skipped.append(code)
+    if resumed:
+        await record_activity(
+            actor, kind="content", action=f"resumed {len(resumed)} held content pages",
+            target=str(batch.get("label") or batch.get("client_name") or ""),
+            entity_type="client" if batch.get("client_id") else None,
+            entity_id=str(batch["client_id"]) if batch.get("client_id") else None,
+        )
+    return ContentBatchResumeResponse(
+        resumed=resumed,
+        skipped=skipped,
+        reason=(
+            "" if resumed
+            else "Nothing in this batch is held - a held page sits at drafting with a "
+                 "'Held' stage. Pages that failed are restarted from the job itself."
+        ),
+    )
 
 
 @router.post("/content/site-navigation", response_model=SiteNavigationResponse)
@@ -1063,6 +1397,12 @@ async def analyze_site_design(
                 source_url=body.site,
                 profile=profile,
                 approved_by=approver,
+                # WHAT KIND of page was measured. The operator's answer wins; absent,
+                # the URL path is asked, and '' when it cannot tell. The kit keys this
+                # capture's section sequence under it, and generation then applies that
+                # sequence ONLY to pages of the same type - a homepage's order is a
+                # correct homepage and a wrong blog post (0154).
+                page_type=body.page_type.strip() or classify_captured_page_type(body.site),
             )
         except Exception as exc:  # never lose the analysis over a storage failure
             save_error = type(exc).__name__
@@ -1092,6 +1432,7 @@ def _persist_brand_kit(
     source_url: str,
     profile: SiteDesignProfile,
     approved_by: str | None = None,
+    page_type: str = "",
 ) -> tuple[str, int, bool]:
     """Store ``profile`` as the client's active brand kit.
 
@@ -1126,6 +1467,10 @@ def _persist_brand_kit(
             "notes": profile.notes,
         },
         approved_by=approved_by,
+        # The key this capture's blueprint is stored under in the kit's per-page-type
+        # map. '' stores the sequence as the singular blueprint only - measured,
+        # reviewable, but never applied to a page type it was not measured on.
+        source_page_type=page_type,
     )
     kit = store.active_brand_kit(client_id) or {}
     return kit_id, int(kit.get("version") or 1), kit.get("approved_at") is not None
@@ -1276,9 +1621,38 @@ async def review_content_job(
 # --------------------------------------------------------------------------- #
 # Republish (LEAD-only) - spec section 46: Update -> Republish.
 # --------------------------------------------------------------------------- #
+def _overwrite_warning(job: dict[str, Any]) -> str:
+    """The refusal text for an unconfirmed re-push of a page that is already live.
+
+    Says three things, because each changes what the operator should do: WHEN we last
+    published, whether we can TELL if the page has changed since, and what the re-push
+    will do to it. The version with no recorded provenance is not softened - a page
+    published before this was recorded is exactly the one most likely to have been edited.
+    """
+    published = job.get("published_at")
+    when = f" on {published:%d %b %Y}" if hasattr(published, "strftime") else ""
+    knowable = bool(job.get("published_remote_modified"))
+    detectable = (
+        "We can see whether it changed since, and the re-push will say if it did."
+        if knowable
+        else "This page was published through a transport that cannot tell us whether it "
+             "has been edited since, so we cannot check for you."
+    )
+    return (
+        f"This page is live on the client's site (last pushed{when}). Republishing REPLACES "
+        f"its content, so any edit made on their side is lost. {detectable} "
+        "Resend with confirm=true to republish anyway."
+    )
+
+
+
 @router.post("/content/jobs/{code}/republish", response_model=ContentJobResponse)
 async def republish_content_job(
-    code: str, repo: ContentRepoDep, enqueue_publish: ContentPublishEnqueuerDep, actor: LeadOnly,
+    code: str,
+    repo: ContentRepoDep,
+    enqueue_publish: ContentPublishEnqueuerDep,
+    actor: LeadOnly,
+    confirm: Annotated[bool, Query()] = False,
 ) -> ContentJobResponse:
     """Re-push an already-published job to WordPress (LEAD-only) - e.g. after the
     live post was hand-edited on the client's side, or the draft was patched here.
@@ -1295,13 +1669,31 @@ async def republish_content_job(
     a missing WordPress connection, an exhausted transport cascade. Re-pushing is
     precisely the remedy for it, and refusing was worse than useless: the UI
     offered the button for exactly these jobs and the API answered 409 every
-    time, so the one recovery path the operator had was a dead control."""
+    time, so the one recovery path the operator had was a dead control.
+
+    ``confirm`` IS THE OVERWRITE GUARD (0158). The re-push REPLACES the post's body, so a
+    page the client edited themselves loses their edit - silently, before this existed.
+    A job that actually reached their site (it has a ``wp_post_id``) therefore needs an
+    explicit ``confirm``, and the refusal says when we published and whether we can even
+    tell if the page changed since.
+
+    It asks rather than infers, deliberately. The REST transport reports the post's own
+    modified time, so there it COULD be checked - but the AIOS Publisher plugin path reads
+    no post at all, and a guard that is silent on one transport and strict on another
+    teaches an operator that silence means safety. A degraded job needs no confirmation:
+    nothing reached the site, so there is nothing to overwrite, and that is the case the
+    button exists for."""
     job = await asyncio.to_thread(repo.get_job_by_code, code)
     if job is None:
         raise _JOB_NOT_FOUND
     current = str(job.get("status") or "")
     if current not in ("done", "degraded"):
         raise _NOT_DONE
+    if not confirm and job.get("wp_post_id"):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=_overwrite_warning(job),
+        )
     updated = await asyncio.to_thread(
         repo.update_job_by_code, code, {"status": "publishing", "stage": "Republishing"}, current
     )
@@ -1310,7 +1702,12 @@ async def republish_content_job(
     enqueue_publish(code)
     client_id = job.get("client_id")
     await record_activity(
-        actor, kind="content", action="republished content to WordPress", target=job.get("client_name", ""),
+        actor, kind="content",
+        action=(
+            "republished content to WordPress, overwriting the live page"
+            if job.get("wp_post_id") else "republished content to WordPress"
+        ),
+        target=job.get("client_name", ""),
         entity_type="client" if client_id is not None else None,
         entity_id=str(client_id) if client_id is not None else None,
     )

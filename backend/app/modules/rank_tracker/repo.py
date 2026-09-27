@@ -180,6 +180,7 @@ class RankRepo:
         site_id: str | None,
         keywords: list[tuple[str, str]],
         target_url: str,
+        hosted_url: str = "",
         engine: str,
         device: str,
         location: str,
@@ -200,7 +201,7 @@ class RankRepo:
         if not keywords:
             return []
         values = sql.SQL(", ").join(
-            sql.SQL("(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)")
+            sql.SQL("(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)")
             for _ in keywords
         )
         params: list[Any] = []
@@ -208,15 +209,25 @@ class RankRepo:
             params += [
                 client_id, client_name, site_id, display, normalized, target_url,
                 engine, device, location, location_code, language, country, tags,
-                cadence, next_check_on,
+                cadence, next_check_on, hosted_url,
             ]
+        # `hosted_url` is part of the ON CONFLICT target because migration 0152 made it
+        # part of the uniqueness key, and the two MUST agree - an inference target that
+        # does not match a unique index raises rather than skipping, so a mismatch here
+        # would fail every insert instead of silently doing the old thing.
+        #
+        # What it buys (M05 A11): a PARASITE page and the client's own site can be tracked
+        # for the SAME term at once. Before, subscribing a hosted page for a term the
+        # client already tracked collided and was silently dropped - and §6 says parasite
+        # pages exist for terms the client cannot yet rank for, which are precisely the
+        # terms already in the tracker. The feature collided with itself by design.
         stmt = sql.SQL(
             "insert into public.tracked_keywords "
             "(client_id, client_name, site_id, keyword, normalized_keyword, target_url, "
             "engine, device, location, location_code, language, country, tags, cadence, "
-            "next_check_on) values {values} "
-            "on conflict (client_id, normalized_keyword, engine, device, location, language) "
-            "do nothing returning *"
+            "next_check_on, hosted_url) values {values} "
+            "on conflict (client_id, normalized_keyword, engine, device, location, "
+            "language, hosted_url) do nothing returning *"
         ).format(values=values)
         with rls_connection(self._user_id) as cur:
             cur.execute(stmt, params)

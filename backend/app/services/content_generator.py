@@ -1028,8 +1028,17 @@ _CAMERA_SUFFIX = (
     "Unretouched, no beauty smoothing, no glossy CGI look, no plastic skin, no "
     "over-smoothing, not airbrushed, not a 3D render. It must look like a candid real "
     "photo a professional took, indistinguishable from a real DSLR photograph. Not an "
-    "infographic, not an illustration, no text, no words, no logos. A real photo of a "
-    "real scene."
+    "infographic, not an illustration, not a flat vector graphic. "
+    # SCREENS AND CHARTS ARE ALLOWED; READABLE TEXT IS NOT. Those used to be one ban, and
+    # collapsing them cost every page its subject: a photograph of a monitor showing a
+    # rising line chart is a real photographable scene, and the chart is geometry rather
+    # than typography. What the model actually fails at is LETTERS - it returns garbled
+    # pseudo-words - so that is what is refused, and a screen is asked for the way a real
+    # photograph of one looks: legible shapes, illegible labels.
+    "Any screen, monitor or dashboard in frame shows charts, graphs and data shapes only - "
+    "lines, bars, curves - with all labels and words too small or too soft to read. "
+    "No legible text, no readable words, letters or numbers anywhere, no logos or brand "
+    "marks. A real photo of a real scene."
 )
 
 # The STRICT scene-authoring rules. The face + texture + negative rules live HERE too -
@@ -1045,13 +1054,21 @@ _PHOTO_BRIEF_RULES = (
     "framed so NO face is visible: from behind, over the shoulder, hands-only, "
     "torso-only, a silhouette, or cropped below the chin. Do NOT describe any visible or "
     "partially-visible human face, eyes, or portrait. "
+    "REGISTER: modern, professional and premium - the way a real company photographs its "
+    "own work. Contemporary workplaces, current equipment, considered light. Never dated "
+    "stock imagery, never a generic lifestyle shot that could illustrate any article. "
+    "SHOW THE SUBJECT ITSELF: if the section is about something digital or analytical, "
+    "photograph its real artifacts - a laptop or monitor showing a rising line chart or a "
+    "dashboard of graphs, a tablet held up mid-review, data on a screen in a meeting "
+    "room; if it is about physical work, photograph that work being done. "
     "STRICT rules for EVERY scene: describe ONLY a physical, photographable moment - who "
     "or what is present, where, what is happening, and the light - with rich real-world "
-    "texture (grain, wear, materials). Include NO text, words, letters or numbers "
-    "anywhere in the scene; NO charts, graphs, diagrams or infographics; NO logos, brand "
-    "marks, user interfaces, or screens showing readable content; NO abstract symbols, "
-    "concept art, or collages; ONE single scene, never multiple panels. Keep each scene "
-    "to one vivid sentence."
+    "texture (grain, wear, materials). Screens and charts ARE allowed and are often the "
+    "most honest way to show a digital subject, but they carry NO readable content: "
+    "describe graphs, lines and bars as shapes, with labels too small or soft to read. "
+    "Include NO legible text, words, letters or numbers anywhere in the scene; NO logos "
+    "or brand marks; NO flat infographics, abstract symbols, concept art or collages; "
+    "ONE single scene, never multiple panels. Keep each scene to one vivid sentence."
 )
 
 # Concrete generic professional / lifestyle scenes - the degrade-safe fallback used when
@@ -1060,22 +1077,22 @@ _PHOTO_BRIEF_RULES = (
 # a fallback image is a real photographable scene with no AI face tell (never the abstract
 # subject, never text/charts).
 _FALLBACK_SCENES: tuple[str, ...] = (
-    "Close-up of a pair of hands typing on a worn laptop keyboard at a wooden desk, a "
-    "ceramic coffee cup beside it, soft natural window light.",
-    "An over-the-shoulder view of someone reviewing printed pages at a desk in a sunlit "
-    "workspace, their face out of frame.",
-    "A tidy modern office desk shot from directly above with a notebook, pen and a small "
-    "plant, warm daylight raking across the wood grain.",
-    "Gloved hands gripping a cordless drill against a raw timber frame on a real job "
-    "site, fine sawdust in the air under clear daylight.",
-    "A person shot from behind walking through a bright office corridor holding a folder, "
-    "late-afternoon sun casting long shadows.",
-    "Close-up of two hands shaking over a desk, cropped below the shoulders, shallow "
-    "depth of field and soft window light.",
-    "A barista's hands tamping ground coffee into a stainless portafilter, steam rising, "
-    "warm cafe light catching the metal.",
-    "A weathered leather tool belt and hand tools resting on a scratched workbench, "
-    "natural light revealing every scuff and grain.",
+    "An over-the-shoulder view of a widescreen monitor on a clean desk showing a rising "
+    "line graph and bar charts, labels too small to read, cool morning window light.",
+    "Close-up of hands at an open laptop whose screen carries a dashboard of coloured "
+    "graphs, a notebook and a pen beside it, soft daylight across brushed aluminium.",
+    "A tablet held up in both hands, cropped below the chin, displaying a steep upward "
+    "curve, a bright modern office softly out of focus behind it.",
+    "A wall-mounted display in a glass meeting room showing a grid of charts, an empty "
+    "table and chairs in the foreground, late-afternoon sun raking across it.",
+    "Two people from behind at a standing desk facing a large monitor of graphs, one "
+    "pointing at a rising line, natural light from a window wall.",
+    "A tidy contemporary desk shot from directly above: an open laptop showing a chart, "
+    "a ceramic cup and a closed notebook, warm daylight across the oak grain.",
+    "Hands writing on a whiteboard covered in boxes and arrows sketched in marker, no "
+    "readable words, bright office light catching the gloss.",
+    "A modern workspace at dusk lit by the glow of a monitor of graphs, an empty chair "
+    "pushed back, the city out of focus through the window behind.",
 )
 
 _PHOTO_BRIEF_MIN_TOKENS = 200

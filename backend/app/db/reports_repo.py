@@ -25,6 +25,7 @@ from psycopg.types.json import Jsonb
 
 from app.core.auth import CurrentUserDep
 from app.db.database import privileged_connection, rls_connection
+from app.services.audit_compare import compare as compare_runs
 
 _Rows = list[dict[str, Any]]
 
@@ -273,6 +274,9 @@ class ServiceReportsStore:
         raising into the beat task."""
         metrics: dict[str, Any] = {
             "audit_first": None, "audit_latest": None, "audit_delta": None,
+            # What CHANGED since the previous audit (B4). None until a client has two.
+            "audit_fixed": None, "audit_new": None, "audit_persisting": None,
+            "audit_unchecked": None,
             "content_30d": 0, "keywords_tracked": 0, "keywords_top10": 0,
             "backlinks_total": 0, "backlinks_new_30d": 0, "citations_total": 0,
         }
@@ -288,6 +292,51 @@ class ServiceReportsStore:
                 metrics["audit_first"] = scores[0]
                 metrics["audit_latest"] = scores[-1]
                 metrics["audit_delta"] = scores[-1] - scores[0]
+
+            # WHAT WAS FIXED, not only that a number moved (B4). The score delta above is a
+            # summary of two measurements; this is the work: the causes that were present in
+            # the previous audit of this site and are gone from the latest one, the ones that
+            # appeared, and the ones still open. Computed by the SAME pure comparison the
+            # dashboard and the client report use, so a monthly summary can never disagree
+            # with the audit screen an operator is reading beside it.
+            #
+            # Best-effort: a client with one audit, or a rebuild that has not run, leaves
+            # these at None and the report simply does not claim anything about change.
+            cur.execute(
+                """select a.id from public.audits a
+                   where a.client_id = %s and a.status = 'done'
+                   order by coalesce(a.finished_at, a.created_at) desc
+                   limit 2""",
+                (client_id,),
+            )
+            recent = [str(r["id"]) for r in cur.fetchall()]
+            if len(recent) == 2:
+                after_id, before_id = recent[0], recent[1]
+                rows: dict[str, list[dict[str, Any]]] = {}
+                for name, target in (("before", before_id), ("after", after_id)):
+                    cur.execute(
+                        """select f.* from public.audit_findings f
+                           where exists (
+                             select 1 from public.audit_finding_instances i
+                             where i.finding_id = f.id and i.audit_id = %s
+                           )""",
+                        (target,),
+                    )
+                    rows[f"{name}_findings"] = [dict(r) for r in cur.fetchall()]
+                    cur.execute(
+                        "select * from public.audit_rollups where audit_id = %s", (target,)
+                    )
+                    rows[f"{name}_rollups"] = [dict(r) for r in cur.fetchall()]
+                comparison = compare_runs(
+                    before_findings=rows["before_findings"],
+                    after_findings=rows["after_findings"],
+                    before_rollups=rows["before_rollups"],
+                    after_rollups=rows["after_rollups"],
+                )
+                metrics["audit_fixed"] = len(comparison.fixed)
+                metrics["audit_new"] = len(comparison.new)
+                metrics["audit_persisting"] = len(comparison.persisting)
+                metrics["audit_unchecked"] = len(comparison.unchecked)
 
             cur.execute(
                 "select count(*) as n from public.content_jobs "

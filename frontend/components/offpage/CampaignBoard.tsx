@@ -116,14 +116,10 @@ export default function CampaignBoard({ clientId }: { clientId?: string }) {
 
           <div className="op-toolset" style={{ marginTop: 10 }}>
             {teamCount > 0 && (
-              <a
-                className="primary-btn"
-                href={`/admin/citations/queue?client=${encodeURIComponent(clientId)}`}
-                style={{ textDecoration: "none" }}
-              >
-                <span className="material-symbols-rounded">play_arrow</span>
-                Work the queue ({teamCount} waiting for this client)
-              </a>
+              <span className="op-muted">
+                {teamCount} waiting for a human on this client — work them from the
+                Citation Assistant extension.
+              </span>
             )}
             <a
               className="ghostbtn"

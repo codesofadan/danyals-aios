@@ -3,7 +3,7 @@ Tags: content, rest-api, publishing, seo, automation
 Requires at least: 5.6
 Tested up to: 6.6
 Requires PHP: 7.2
-Stable tag: 1.9.1
+Stable tag: 1.14.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -32,10 +32,17 @@ effectively every host.
 = What it does =
 
 * Adds one REST endpoint: `POST /wp-json/aios/v1/publish` (shared-key auth).
-* Adds a connectivity probe: `GET /wp-json/aios/v1/ping`.
+* Adds a whole-site endpoint: `POST /wp-json/aios/v1/site` — many pages, their
+  parent/child hierarchy, a nested navigation menu and (only when asked) the front
+  page, applied idempotently. It NEVER deletes anything.
+* Adds a connectivity probe: `GET /wp-json/aios/v1/ping`, which also reports which
+  editor and which meta keys this site can actually accept.
 * Creates each pushed page as a DRAFT (configurable) so you publish it yourself.
 * Sets the SEO title / meta description / focus keyword for BOTH Yoast SEO and
-  Rank Math, so it works with whichever you have installed.
+  Rank Math, so it works with whichever you have installed — on BOTH endpoints.
+* Sets the Open Graph and Twitter/X card title, description and image for both
+  plugins, so the social preview is what AIOS chose rather than whatever each
+  plugin's title template happened to produce.
 * Stores the JSON-LD schema AIOS generated and outputs it in the page `<head>`.
 * Sideloads a featured image when one is supplied and assigns categories.
 * Lists all AIOS-pushed content on an "AIOS Content" admin screen with Publish,
@@ -79,6 +86,39 @@ of the site. To re-brand, edit the `--aios-*` variables at the top of the styles
 * Every admin action is protected by a capability check and a nonce.
 
 == Changelog ==
+
+= 1.14.0 =
+* FIXED (DATA LOSS): the whole-site endpoint wrote `post_content` unconditionally, so a
+  delivery that carried no page bodies — which is exactly what a navigation rebuild is —
+  EMPTIED the body of every page it touched. An absent `content` key now means "leave the
+  body alone"; an explicitly empty string still means "this page has no body". A new
+  `content_only_if_new` flag covers a seed body (the auto-created Services / Locations /
+  Blog hub), so its placeholder line can never overwrite real landing copy.
+* FIXED: every page was looked up as a WordPress `page`. A long-form article publishes as
+  a `post`, so re-delivering one found nothing, created an EMPTY duplicate at its slug,
+  and pointed the menu at the duplicate instead of the article. The plan can now carry the
+  post's `post_id` (exact) and its `post_type`, and the slug lookup tries both types.
+* FIXED: a menu item pointing at a `post` was invisible to the de-duplication scan, so
+  every rebuild appended a second item for the same article. Menu items now also name the
+  object's real type instead of always claiming `page`.
+* FIXED: `post_parent` was written for non-hierarchical types, where WordPress ignores it.
+  Nesting for a `post` comes from the menu, which handles any object type.
+* FIXED: the front page could be set to a blog post, which shows visitors nothing. It is
+  now refused with a reason.
+* ADDED: the `/site` endpoint applies SEO meta, JSON-LD schema, design CSS, the
+  full-width flag and the featured image — through the SAME functions `/publish` uses.
+  Previously a page delivered as part of a site arrived with no SEO title, no meta
+  description, no focus keyword and no schema, while the identical page pushed one at a
+  time got all four.
+* ADDED: Open Graph + Twitter/X card title, description and image for both Yoast and
+  Rank Math (including Rank Math's `twitter_use_facebook` switch, without which its
+  explicit Twitter values are written and then ignored). They fall back to the SEO title
+  and description, so a caller that supplies only those gets a card matching its search
+  snippet. `og:url` and `og:type` are deliberately left to the SEO plugin, which always
+  emits them correctly.
+* INTERNAL: one implementation of the Elementor-tree write, shared by both endpoints. The
+  site route had its own copy, which lacked the image-localization pass — so a page
+  delivered as part of a site kept rendering its imagery from the source server.
 
 = 1.9.1 =
 * FIXED: every Elementor page this plugin has ever pushed was being corrupted on

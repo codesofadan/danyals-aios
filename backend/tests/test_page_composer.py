@@ -124,10 +124,10 @@ def test_hero_carries_title_and_cta_button() -> None:
 
 def test_benefits_render_as_an_icon_box_grid() -> None:
     tree = build_elementor_data(_DRAFT, blueprint=_blueprint("service"), cta=_CTA)
-    benefits = _sections_by_class(tree, "aios-benefits")
-    assert benefits, "the 'Why choose Acme' block slotted into the benefits section"
-    assert "aios-layout-grid" in benefits[0]["settings"]["_css_classes"]
-    boxes = [w for w in _widgets([benefits[0]]) if w["widgetType"] == "icon-box"]
+    features = _sections_by_class(tree, "aios-features")
+    assert features, "the 'Why choose Acme' block slotted into the card-grid section"
+    assert "aios-layout-grid" in features[0]["settings"]["_css_classes"]
+    boxes = [w for w in _widgets([features[0]]) if w["widgetType"] == "icon-box"]
     assert len(boxes) == 3, "one icon-box card per bullet"
     titles = {b["settings"]["title_text"] for b in boxes}
     assert "Fast response" in titles and "Licensed" in titles
@@ -212,13 +212,13 @@ def test_section_image_renders_inside_its_own_section_not_bunched() -> None:
     )
     tree = build_elementor_data(draft, blueprint=_blueprint("service"), cta=_CTA)
     hero = _sections_by_class(tree, "aios-hero")[0]
-    benefits = _sections_by_class(tree, "aios-benefits")[0]
+    features = _sections_by_class(tree, "aios-features")[0]
     hero_imgs = [w["settings"]["image"]["url"] for w in _widgets([hero]) if w["widgetType"] == "image"]
-    benefit_imgs = [w["settings"]["image"]["url"] for w in _widgets([benefits]) if w["widgetType"] == "image"]
-    assert hero_imgs == ["https://cdn.test/hero.png"]        # hero image in the hero
-    assert benefit_imgs == ["https://cdn.test/benefits.png"]  # section image in ITS section
-    # The benefits section still renders its grid cards alongside the image.
-    assert any(w["widgetType"] == "icon-box" for w in _widgets([benefits]))
+    grid_imgs = [w["settings"]["image"]["url"] for w in _widgets([features]) if w["widgetType"] == "image"]
+    assert hero_imgs == ["https://cdn.test/hero.png"]     # hero image in the hero
+    assert grid_imgs == ["https://cdn.test/benefits.png"]  # section image in ITS section
+    # The grid section still renders its cards alongside the image.
+    assert any(w["widgetType"] == "icon-box" for w in _widgets([features]))
 
 
 def test_empty_draft_still_yields_a_valid_tree() -> None:
@@ -255,8 +255,8 @@ def test_worker_resolves_a_template_only_job_to_a_rich_tree() -> None:
     tree = json.loads(payload["elementor_data"])
     classes = [str(s.get("settings", {}).get("_css_classes", "")) for s in tree]
     assert any(c.startswith("aios-hero") for c in classes)
-    assert any(c.startswith("aios-benefits") for c in classes)   # grid slot
+    assert any(c.startswith("aios-features") for c in classes)   # grid slot
     assert any(c.startswith("aios-faq") for c in classes)        # accordion slot
     # There is an accordion widget (the FAQ) and an icon-box grid (benefits).
     kinds = {w["widgetType"] for w in _widgets(tree)}
-    assert "accordion" in kinds and "icon-box" in kinds
+    assert "accordion" in kinds and "icon-box" in kinds  # the FAQ and the card grid

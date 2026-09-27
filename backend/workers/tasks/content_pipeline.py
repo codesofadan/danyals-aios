@@ -23,11 +23,17 @@ WHAT IS DIFFERENT FROM v1, and why it matters to the screens built on top:
   written as `failed`.
 * **The QA judge is connected.** v1's judge seam exists and is never passed one.
 
-WHAT THIS DOES NOT DO: switch the platform over. `settings.content_engine`
-selects the engine and defaults to `v1`. Making an unverified engine the default
-for a live agency would be exactly the "faking success" this codebase keeps
-closing; the flip belongs after a real end-to-end run, which currently cannot be
-done because the provider account has no credit.
+`settings.content_engine` selects the engine and NOW DEFAULTS TO `v2` - this one.
+This paragraph used to say "defaults to `v1`", and that was true when written: the
+flip was deliberately held back until a real end-to-end run was possible, which it
+was not while the provider account had no credit. The flip has since happened (see
+`app/config.py`, which carries the reasoning and the one-line revert), and a
+docstring claiming the opposite is worse than none - an engineer reading it would
+conclude that none of this module runs in production.
+
+VERIFIED END TO END, 2026-09-26: a page halted at the Experience gate, resumed when
+the questions were answered, and reached `needs_review` at 1350 words with its real
+spend recorded on the row.
 """
 
 from __future__ import annotations
@@ -45,6 +51,7 @@ from app.services.content_pipeline.context import PipelineContext, StageResult
 from app.services.content_pipeline.runner import (
     EDIT_STAGES,
     PAGE_STAGES,
+    TEMPLATED_STAGES,
     PipelineRun,
     run_page,
 )
@@ -52,6 +59,7 @@ from app.services.content_pipeline.writer import DoctrineWriter
 from app.services.content_research import GatedResearcher, SsrfSafePageFetcher
 from app.services.cost_gate import CostGate
 from app.services.notifications import notify_leads_sync
+from app.services.page_compose import model_from_composed
 from workers.celery_app import celery_app
 from workers.tasks.content import (
     ContentJobOutcome,
@@ -60,6 +68,7 @@ from workers.tasks.content import (
     _build_gate,
     _ContentGatedWriter,
     _keyword_map,
+    effective_design_profile,
 )
 
 logger = structlog.get_logger(__name__)
@@ -233,6 +242,14 @@ def brief_facts(pack: dict[str, Any] | None) -> tuple[str, ...]:
         ("unique_data", "only we know"),
         ("services", "service"),
         ("testimonials", "testimonial"),
+        # The three the wireframe's gated slots are built from. They belong here for the
+        # same reason the four above do, and for one more: the claims guard deletes any
+        # sentence stating a specific that is not in this list, so a price or a coach's
+        # name the client actually supplied would have been scrubbed off the page it was
+        # supplied for - the section filled correctly and then emptied itself.
+        ("pricing", "price"),
+        ("team", "team member"),
+        ("service_areas", "service area"),
     ):
         values = pack.get(key) or []
         if isinstance(values, (list, tuple)):
@@ -273,79 +290,70 @@ def _design_profile_for(
     """The design system this page is built to: the client's STORED kit, else the
     profile the request carried.
 
-    The stored kit wins, and only an APPROVED kit counts. A per-request
-    ``design_profile`` is whatever the wizard happened to hold in React state at
-    launch; the kit is what the client's design system actually IS, versioned and
-    accepted by a human. Reading it here - server-side, at generation time - is what
-    makes "analyse once, conform forever" true, rather than requiring every caller
-    to remember to send the design with every job.
+    ONE IMPLEMENTATION, shared with the publish path
+    (``workers.tasks.content.effective_design_profile``). It used to be resolved here and
+    NOT there, so a job took its STRUCTURE from the client's approved kit and its STYLING
+    from a generic fallback - the kit's palette and fonts never reached the published
+    page. Two readers of the same decision is how that happened, so there is now one.
 
-    An UNAPPROVED capture is deliberately not used (0146). The analyzer can produce
-    a profile that validates and is wrong - a bot-blocked capture, a cookie wall, a
-    site mid-redesign - and letting whatever was measured last silently become the
-    system forty pages are built to is expensive to discover and expensive to undo.
-
-    An explicit per-job profile is still honoured when no kit exists, so a client
-    who has never been analysed keeps today's behaviour exactly.
+    The stored kit wins, and only an APPROVED kit counts (0146). A per-request
+    ``design_profile`` is whatever the wizard happened to hold in React state at launch;
+    the kit is what the client's design system actually IS, versioned and accepted by a
+    human. Reading it server-side is what makes "analyse once, conform forever" true
+    rather than requiring every caller to remember to send the design with every job.
 
     Never raises: a storage failure falls back to the request's profile rather than
     failing the job.
     """
-    client_id = str(row.get("client_id") or "").strip()
-    if client_id:
-        try:
-            from app.modules.content_planning.repo import ContentPlanningStore
+    from workers.tasks.content import effective_design_profile
 
-            kit = ContentPlanningStore().approved_brand_kit(client_id)
-            if kit:
-                blueprint = kit.get("blueprint") or []
-                raw = kit.get("raw_measurements") or {}
-                if blueprint or raw.get("section_order"):
-                    return {
-                        "palette": kit.get("palette") or {},
-                        "typography": kit.get("typography") or {},
-                        "components": kit.get("components") or {},
-                        "layout": {
-                            "blueprint": blueprint,
-                            "section_order": raw.get("section_order") or [],
-                            "container_width": raw.get("container_width") or "1200px",
-                            "hero_style": raw.get("hero_style") or "centered",
-                            "cta_style": raw.get("cta_style") or "banner",
-                        },
-                    }
-        except Exception:
-            logger.warning("brand_kit_read_failed", client_id=client_id)
-    return pack.get("design_profile") or None
+    # `pack` is the row's own source_pack; pass it through the row so the shared
+    # resolver sees the same inline profile this caller would have used.
+    merged = {**row, "source_pack": pack}
+    return effective_design_profile(merged)
 
 
-def _blueprint_sections(
-    row: dict[str, Any], pack: dict[str, Any]
-) -> tuple[tuple[str, str], ...]:
-    """The blueprint's CONTENT-bearing sections as (kind, heading), in order.
+def _blueprint(row: dict[str, Any], pack: dict[str, Any]) -> tuple[Any, ...]:
+    """The job's resolved wireframe, whole.
 
-    Chrome sections (trust_bar, map, gallery) are excluded: the theme and the AIOS
-    Publisher plugin supply those from live data, and asking the writer for copy it
-    has nowhere to go would spend tokens producing text the page never renders.
+    RESOLVED ONCE, HERE. The analyzed design, the operator's chosen template and the
+    page-type default are weighed by one function (``resolve_blueprint``), and every stage
+    that needs the wireframe reads THIS result. The compose stage used to resolve its own
+    from ``brief["template"]`` - a key nothing writes - so it silently got the page type's
+    default while the publish path got the operator's actual choice. The two disagreed on
+    every templated page, and the symptom was a page built to the wrong template with no
+    error anywhere.
 
-    Never raises - an unresolvable blueprint yields () and the outline falls back to
+    Never raises - an unresolvable blueprint yields () and the pipeline falls back to
     planning a plain article, which is the behaviour every page had before this.
     """
     try:
         from app.services.page_blueprints import resolve_blueprint
 
-        specs = resolve_blueprint(
+        return tuple(resolve_blueprint(
             design_profile=_design_profile_for(row, pack),
             template=(str(pack.get("template") or "").strip() or None),
             page_type=str(row.get("page_type") or "blog"),
-        )
-        return tuple(
-            (s.kind, str(getattr(s, "heading", "") or "")) for s in specs if s.content
-        )
+        ))
     except Exception:
         return ()
 
 
-def _context_for(row: dict[str, Any], settings: Settings) -> PipelineContext:
+def _blueprint_sections(specs: tuple[Any, ...]) -> tuple[tuple[str, str], ...]:
+    """The blueprint's CONTENT-bearing sections as (kind, heading), in order.
+
+    Chrome sections (trust_bar, map, gallery) are excluded: the theme and the AIOS
+    Publisher plugin supply those from live data, and asking the writer for copy it
+    has nowhere to go would spend tokens producing text the page never renders.
+    """
+    return tuple(
+        (s.kind, str(getattr(s, "heading", "") or "")) for s in specs if s.content
+    )
+
+
+def _context_for(
+    row: dict[str, Any], settings: Settings, profile: dict[str, Any] | None = None
+) -> PipelineContext:
     """Build the pipeline's context from the job row.
 
     The target keyword is the one the operator actually chose. v1 fell back to the
@@ -356,6 +364,7 @@ def _context_for(row: dict[str, Any], settings: Settings) -> PipelineContext:
     pack = row.get("source_pack") or {}
     if not isinstance(pack, dict):
         pack = {}
+    _wireframe = _blueprint(row, pack)
     return PipelineContext(
         job_code=str(row.get("code") or ""),
         job_id=str(row["id"]) if row.get("id") else None,
@@ -369,8 +378,30 @@ def _context_for(row: dict[str, Any], settings: Settings) -> PipelineContext:
         # page-type default), so the sections the outline plans for are exactly the
         # sections the published page is wrapped into. Resolving it twice from one
         # function is what stops the two drifting.
-        blueprint_sections=_blueprint_sections(row, pack),
-        vertical=str(pack.get("vertical") or ""),
+        blueprint=_wireframe,
+        blueprint_sections=_blueprint_sections(_wireframe),
+        # The client's first-party material, verbatim. The compose stage's evidence gate
+        # reads it to decide which slots may be written at all, so an unseeded pack here
+        # drops the price table, the testimonials, the team and the service areas from
+        # every page - indistinguishable, from inside the pipeline, from a client who
+        # supplied none of it.
+        source_pack=dict(pack),
+        # WHAT KIND OF BUSINESS THIS IS, and why it must be seeded here.
+        #
+        # This used to read `source_pack["vertical"]` alone - a key nothing in the
+        # product ever sets - so `ctx.vertical` was ALWAYS "" and the writer was told
+        # nothing about the client's trade. MEASURED on a real run (CJ-4346): a
+        # home-services client whose stored `primary_category` is "Home Services" was
+        # given a fitness topic, and the draft opened "Our gym sits at 1 Main St" and
+        # headed a section "Fitness for real Lahore life". The model inferred the
+        # business type from the TOPIC because nothing told it otherwise, and published
+        # copy asserting the client runs a gym.
+        #
+        # The category was collected at client creation and sat in
+        # `client_business_profiles.primary_category` the whole time. It is the same
+        # class of defect as the design kit: stored, then dropped at the seam that
+        # needed it.
+        vertical=str(pack.get("vertical") or (profile or {}).get("primary_category") or ""),
         framework=str(row.get("framework") or "PAS"),
         geo=str(pack.get("geo") or pack.get("city") or ""),
         # The context's own default (1200) stands unless the operator's brief asked
@@ -439,9 +470,56 @@ def _persist_hold(
     )
 
 
+#: Page types whose page is a LAYOUT rather than an article. A blog/FAQ page is prose with
+#: structure around it; these are structure with prose in it, and the difference decides
+#: which stage sequence runs.
+#: The one page type with no full-page wireframe: a Google Business post is a short
+#: update in someone else's UI, not a page, and there is no template for it.
+_UNTEMPLATED_PAGE_TYPES: frozenset[str] = frozenset({"gbp_post"})
+
+
+def _is_templated(row: dict[str, Any]) -> bool:
+    """Whether this job builds a wireframed layout (compose) or an article (draft).
+
+    EVERY PAGE TYPE HAS A TEMPLATE, and a blog post is not the exception it looks like.
+    This used to send blog and FAQ pages down the prose path on the reasoning that an
+    article is prose with structure around it rather than structure with prose in it -
+    which is a real distinction and the wrong conclusion. A published article still opens
+    with a hero, still answers questions in an accordion, still closes on a call to
+    action; what makes it an article is that ONE of its slots holds long-form prose, and
+    the blog and FAQ wireframes carry exactly that (an ``absorb`` body slot). Running it
+    as an undifferentiated document instead produced the flat wall of text that started
+    this rewrite.
+
+    So the wireframe is the default and the exceptions are named. The operator's explicit
+    template always wins - choosing `service` on a blog-typed job is an instruction, not a
+    mistake to correct.
+    """
+    pack = row.get("source_pack") if isinstance(row.get("source_pack"), dict) else {}
+    template = str((pack or {}).get("template") or "").strip().lower()
+    if template and template != "auto":
+        return True
+    return str(row.get("page_type") or "").strip().lower() not in _UNTEMPLATED_PAGE_TYPES
+
+
+def _composed_images(ctx: PipelineContext) -> list[tuple[str, str]]:
+    """The generated images, as (url, alt), in generation order.
+
+    Read from the images stage's own result rather than scraped back out of the draft:
+    the whole point of the composed path is that a picture belongs to a SECTION, and a
+    URL recovered from markdown has already lost which one.
+    """
+    result = ctx.result_for("images")
+    if result is None:
+        return []
+    urls = [str(u) for u in (result.data.get("urls") or []) if str(u).strip()]
+    alts = [str(a) for a in (result.data.get("alts") or [])]
+    return [(url, alts[i] if i < len(alts) else "") for i, url in enumerate(urls)]
+
+
 def _persist_success(
     store: ContentStore, code: str, ctx: PipelineContext, run: PipelineRun,
-    *, applied_edit: bool = False,
+    *, applied_edit: bool = False, row: dict[str, Any] | None = None,
 ) -> ContentJobOutcome:
     """Write everything the page produced and hand it to the human gate."""
     # The stages put their output at the TOP of StageResult.data - there is no
@@ -449,6 +527,7 @@ def _persist_success(
     # the FIRST paid run wrote an empty qa_score and no JSON-LD onto a job whose
     # gate had actually scored it: the work was done and silently dropped on the
     # floor between the pipeline and the row.
+    compose_result = ctx.result_for("compose")
     gate_result = ctx.result_for("gate")
     qa = dict(gate_result.data) if gate_result else {}
     if gate_result is not None and "notes" not in qa:
@@ -494,6 +573,41 @@ def _persist_success(
         "outline": ctx.outline,
         "qa_score": qa,
     }
+    # THE COMPOSED PAGE IS THE PAGE. Persisted into `source_pack.page_model`, which is
+    # exactly where a hand-edited model already lives - so the publish path, the live
+    # editor and the preview all read one representation, and a templated page needs no
+    # second code path anywhere downstream.
+    if compose_result is not None and ctx.sections:
+        source_pack = (row or {}).get("source_pack")
+        pack_now = dict(source_pack) if isinstance(source_pack, dict) else {}
+        # THE CLIENT'S APPROVED KIT FIRST, the job's inline profile only as a fallback -
+        # the same precedence `effective_design_profile` documents, and for the same
+        # reason: the kit is what the client's design system actually IS, versioned and
+        # accepted by a human, while an inline profile is whatever a wizard happened to
+        # hold in React state at launch. Reading only the inline key here would have
+        # baked a generic palette into the model, and because the model now carries its
+        # own stylesheet to publish, that generic palette would have been final - the
+        # publish path could no longer reach past it to the kit.
+        design_now = effective_design_profile(row or {}) or {}
+        model = model_from_composed(
+            ctx.sections,
+            design=design_now,
+            title=ctx.title or str((row or {}).get("topic") or ""),
+            images=_composed_images(ctx),
+            cta_url=str(pack_now.get("wp_site_url") or pack_now.get("site_url") or ""),
+            # THE TWO SLOTS THE PRODUCT FILLS RATHER THAN THE WRITER. A contact block is
+            # the client's real NAP and a related block is links to its own published
+            # pages; both are data already loaded for this job, and asking a model to
+            # produce either is asking it to invent an address. Absent -> the slot is
+            # dropped rather than published as an empty band.
+            nap=_load_nap(str((row or {}).get("client_id") or "") or None),
+            internal_links=_internal_url_registry(
+                row or {}, str((row or {}).get("client_id") or "") or None
+            ),
+        )
+        pack_now["page_model"] = model.to_dict()
+        fields["source_pack"] = pack_now
+
     if ctx.title or ctx.meta_description:
         outline = dict(ctx.outline)
         outline["meta"] = {"title": ctx.title, "description": ctx.meta_description}
@@ -606,6 +720,36 @@ def _persist_success(
     )
 
 
+def _batch_over_ceiling(
+    store: ContentStore, row: dict[str, Any]
+) -> tuple[bool, float, float]:
+    """Has this job's batch already spent its ceiling? ``(over, spent, ceiling)``.
+
+    Reads the batch's spend from the JOBS' own committed costs rather than from a stored
+    running total, so the check can never be made against a number that drifted from what
+    was actually charged.
+
+    Never raises and never blocks on its own uncertainty: a job with no batch, a batch with
+    no ceiling, or a store that cannot answer all return "not over". A ceiling is a bound
+    the operator asked for, not a safety control - the global halt and the client cap are
+    the safety controls, and those are enforced by the gate whatever happens here.
+    """
+    batch_id = row.get("batch_id")
+    if not batch_id:
+        return False, 0.0, 0.0
+    reader = getattr(store, "batch_spend", None)
+    if not callable(reader):
+        return False, 0.0, 0.0
+    try:
+        spent, ceiling = reader(str(batch_id))
+    except Exception as exc:
+        logger.warning("content_batch_ceiling_unreadable", error=type(exc).__name__)
+        return False, 0.0, 0.0
+    if ceiling is None or ceiling <= 0:
+        return False, float(spent or 0.0), 0.0
+    return float(spent or 0.0) >= float(ceiling), float(spent or 0.0), float(ceiling)
+
+
 def execute_pipeline_job(
     deps: PipelineDeps, code: str, *, settings: Settings, gate: CostGate,
     resume: bool = False,
@@ -644,6 +788,26 @@ def execute_pipeline_job(
         return ContentJobOutcome(code=code, status=status, state="noop",
                                  reason=f"job is {status}, not queued")
 
+    # THE BATCH CEILING (0157), checked BEFORE the first spend of this page.
+    #
+    # Why here and not inside the cost gate: the gate bounds the AGENCY (global halt) and
+    # the CLIENT (monthly cap), which are standing limits. A batch ceiling bounds ONE
+    # decision an operator made ten minutes ago - "these thirty pages may cost twenty
+    # dollars" - and the gate has no concept of the job's batch.
+    #
+    # It HOLDS rather than fails, exactly like the budget degrade beside it: nothing is
+    # wrong with the page, the operator simply has not authorised more spend yet. Raising
+    # the ceiling and resuming the batch picks it up unchanged.
+    over, spent, ceiling = _batch_over_ceiling(deps.store, row)
+    if over:
+        stage = f"Held - batch ceiling reached (${spent:.2f} of ${ceiling:.2f})"
+        deps.store.update(code, {"stage": stage[:300]})
+        logger.info("content_batch_ceiling_hold", code=code, spent=spent, ceiling=ceiling)
+        return ContentJobOutcome(
+            code=code, status="drafting", state="degraded", stage=stage,
+            reason="batch cost ceiling reached",
+        )
+
     # A resume is already `drafting`; writing the status again would be a no-op
     # transition, and the guard trigger only needs the stage stream.
     first_label = STAGE_LABEL["guided_edit"] if editing else STAGE_LABEL["sme"]
@@ -653,7 +817,7 @@ def execute_pipeline_job(
         else {"status": "drafting", "stage": first_label},
     )
     row["engagement_id"] = _ensure_engagement(deps, row)
-    ctx = _context_for(row, settings)
+    ctx = _context_for(row, settings, deps.nap)
     if editing:
         # The edit works on the page the lead actually read, not a fresh one.
         ctx.draft_md = str(row.get("draft_md") or "")
@@ -678,10 +842,19 @@ def execute_pipeline_job(
     if "sme" in stages:
         pack = row.get("source_pack") if isinstance(row.get("source_pack"), dict) else None
         stages["sme"] = _sme_with_client_facts(stages["sme"], deps.nap, pack)
+    # WHICH SHAPE THIS PAGE IS, and it is the decision the whole rewrite turns on.
+    #
+    # A LAYOUT (service, location, about, homepage, FAQ, local) is built by filling a
+    # fixed seven-slot wireframe with typed data. An ARTICLE is prose, and prose is what
+    # the outline/draft/voice sequence is for. Before this, everything went down the prose
+    # path and the layout was applied afterwards as a wrapper - which is why a service page
+    # with eleven specified sections published as three.
+    order = EDIT_STAGES if editing else (
+        TEMPLATED_STAGES if _is_templated(row) else PAGE_STAGES
+    )
     try:
         run = run_page(
-            ctx, _with_progress(stages, deps.store, code),
-            order=EDIT_STAGES if editing else PAGE_STAGES,
+            ctx, _with_progress(stages, deps.store, code), order=order,
         )
     except Exception as exc:  # a bug in the sequence itself, not a stage outcome
         logger.warning("content_pipeline_crashed", code=code, error=type(exc).__name__)
@@ -708,7 +881,7 @@ def execute_pipeline_job(
             deps.store, code, run,
             run.reason or f"{run.stopped_at or 'the pipeline'} produced no draft",
         )
-    return _persist_success(deps.store, code, ctx, run, applied_edit=editing)
+    return _persist_success(deps.store, code, ctx, run, applied_edit=editing, row=row)
 
 
 @celery_app.task(name="run_content_pipeline_job")  # type: ignore[untyped-decorator]  # celery's decorator is untyped

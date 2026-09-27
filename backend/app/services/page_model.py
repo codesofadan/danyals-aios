@@ -436,11 +436,89 @@ def _palette(design: dict[str, Any]) -> dict[str, str]:
     return {k: str(p.get(k) or _DEFAULTS[k]) for k in _DEFAULTS}
 
 
+#: Generic families a font stack can END with. A stack that names none of these is
+#: incomplete: when every family in it is missing, the browser falls back to its default,
+#: which is a SERIF on every major engine.
+_GENERIC_FAMILIES = ("serif", "sans-serif", "monospace", "cursive", "fantasy",
+                     "system-ui", "ui-sans-serif", "ui-serif", "ui-monospace")
+
+#: What gets appended to an analyzed stack that ends nowhere.
+_FALLBACK_STACK = 'system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif'
+
+
+def _complete_stack(stack: str) -> str:
+    """A font stack that is guaranteed to land somewhere sensible.
+
+    MEASURED ON A REAL CAPTURE. The analyzer read hudamoji.pk and returned
+    ``Inter, "Inter Fallback"`` - which is what the site's own CSS says, and is correct as
+    a transcription. It is also a stack naming two families that exist on that site's
+    visitors' machines only if Inter is installed, and ending in no generic family at all.
+    On a machine without Inter, every published page rendered in the browser's default
+    serif: a sans-serif design system, transcribed faithfully, published as Times.
+
+    So a generic fallback is appended unless the stack already ends in one. The analyzed
+    families keep their priority - this only decides where the chain STOPS.
+    """
+    stack = stack.strip().rstrip(",").strip()
+    if not stack:
+        return _FALLBACK_STACK
+    families = [f.strip().strip('"\'').lower() for f in stack.split(",")]
+    if any(f in _GENERIC_FAMILIES for f in families):
+        return stack
+    return f"{stack}, {_FALLBACK_STACK}"
+
+
 def _fonts(design: dict[str, Any]) -> tuple[str, str]:
     t = _as_dict(design.get("typography"))
-    head = str(t.get("heading_font") or "Sora, system-ui, sans-serif")
-    body = str(t.get("body_font") or "Inter, system-ui, sans-serif")
+    head = _complete_stack(str(t.get("heading_font") or "Sora, system-ui, sans-serif"))
+    body = _complete_stack(str(t.get("body_font") or "Inter, system-ui, sans-serif"))
     return head, body
+
+
+#: Families never worth asking a font host for: they are the browser's own, or they are
+#: the generic families `_complete_stack` appends.
+_SYSTEM_FAMILIES: frozenset[str] = frozenset({
+    *_GENERIC_FAMILIES,
+    "-apple-system", "blinkmacsystemfont", "segoe ui", "roboto", "helvetica",
+    "helvetica neue", "arial", "times", "times new roman", "georgia", "courier",
+    "courier new", "verdana", "tahoma", "inherit", "initial", "unset",
+})
+
+#: Suffixes a BUILD TOOL appends to a family name, never a real typeface.
+#:
+#: MEASURED on a live capture: a Next.js site's computed CSS reads
+#: `Inter, "Inter Fallback"` - the second entry is a locally-generated metric-matched
+#: face that exists only in that site's build. Asking a font host for it is asking for a
+#: family nobody has, and the analyzer is right to transcribe it: what is wrong is
+#: treating it as something to go and fetch.
+_BUILD_ARTEFACT_SUFFIXES: tuple[str, ...] = ("fallback", "local", "override", "adjusted")
+
+
+def font_families(design: dict[str, Any]) -> list[str]:
+    """The REAL typeface names this design asks for, in priority order.
+
+    WHY THE PUBLISH PATH NEEDS THIS. ``model_css`` writes the analyzed font stack into the
+    page, and naming a family is not the same as having it: on a site that never loaded
+    Poppins, ``font-family: Poppins, …`` renders in whatever comes next in the stack. The
+    page then looks nothing like the design it was built from, and nothing reports a
+    problem because the CSS is exactly right. So the families travel with the payload and
+    the publisher plugin loads them.
+
+    System and generic families are dropped - they need no loading and asking a font host
+    for "sans-serif" is a 404 the page waits on.
+    """
+    out: list[str] = []
+    for stack in _fonts(design):
+        for raw in stack.split(","):
+            name = raw.strip().strip("\"'")
+            lowered = name.lower()
+            if not name or lowered in _SYSTEM_FAMILIES:
+                continue
+            if lowered.split()[-1] in _BUILD_ARTEFACT_SUFFIXES and " " in lowered:
+                continue
+            if name not in out:
+                out.append(name)
+    return out
 
 
 def _radius(design: dict[str, Any]) -> int:
@@ -452,11 +530,49 @@ def _radius(design: dict[str, Any]) -> int:
     return 12
 
 
+#: A few colour keywords worth knowing, because a real stylesheet uses them and an
+#: unparsed colour is silently treated as LIGHT, which is the dangerous direction.
+_NAMED_COLORS: dict[str, tuple[int, int, int]] = {
+    "black": (0, 0, 0), "white": (255, 255, 255), "transparent": (255, 255, 255),
+    "navy": (0, 0, 128), "maroon": (128, 0, 0), "darkblue": (0, 0, 139),
+    "midnightblue": (25, 25, 112), "darkslategray": (47, 79, 79), "dimgray": (105, 105, 105),
+}
+
+
+def _rgb(color: str) -> tuple[int, int, int] | None:
+    """Parse a CSS colour to ``(r, g, b)``, or ``None`` when it cannot be read.
+
+    ACCEPTS WHAT A REAL CAPTURE PRODUCES, not just what this module used to emit. The
+    analyzer reads computed styles out of a live browser, and a browser reports colours as
+    ``rgb(23, 23, 23)`` - never as a hex triplet. Parsing only ``#rrggbb`` meant every
+    analyzed palette was unreadable here, and "unreadable" resolved to "light": a client
+    whose accent was near-black got a call-to-action band painted in it with near-black
+    text on top. The band published invisible.
+    """
+    value = color.strip().lower()
+    if value in _NAMED_COLORS:
+        return _NAMED_COLORS[value]
+    m = re.fullmatch(r"#?([0-9a-f]{6})", value)
+    if m:
+        return tuple(int(m.group(1)[i:i + 2], 16) for i in (0, 2, 4))  # type: ignore[return-value]
+    m = re.fullmatch(r"#?([0-9a-f]{3})", value)
+    if m:
+        return tuple(int(c * 2, 16) for c in m.group(1))  # type: ignore[return-value]
+    m = re.fullmatch(r"rgba?\(\s*([\d.]+)[\s,]+([\d.]+)[\s,]+([\d.]+)\s*(?:[,/].*)?\)", value)
+    if m:
+        try:
+            return tuple(max(0, min(255, round(float(m.group(i))))) for i in (1, 2, 3))  # type: ignore[return-value]
+        except ValueError:
+            return None
+    return None
+
+
 def _is_dark(hex_color: str) -> bool:
-    m = re.fullmatch(r"#?([0-9a-fA-F]{6})", hex_color.strip())
-    if not m:
+    """Whether text on this colour needs to be light. Unparseable -> treated as light."""
+    rgb = _rgb(hex_color)
+    if rgb is None:
         return False
-    r, g, b = (int(m.group(1)[i:i + 2], 16) for i in (0, 2, 4))
+    r, g, b = rgb
     return (0.299 * r + 0.587 * g + 0.114 * b) < 128
 
 
@@ -548,24 +664,57 @@ def _feature_row() -> str:
     return f'<div class="feature-row">{chips}</div>'
 
 
+def model_css(model: PageModel) -> str:
+    """The page's stylesheet as RAW CSS text - no ``<style>`` wrapper.
+
+    SEPARATE FROM THE BODY ON PURPOSE. WordPress will not accept a stylesheet inside a
+    post: the AIOS Publisher plugin strips ``<style>`` blocks including their contents
+    before saving, and it has to - ``wp_kses_post`` removes the tag but KEEPS the text,
+    which would dump the whole stylesheet onto the page as visible characters. A page
+    published with its design inline therefore arrives with every class name intact and
+    not one rule behind them, which is exactly how a carefully composed page renders as a
+    stack of naked paragraphs.
+
+    So the publish path sends this text in the payload's ``design_css`` field, which the
+    plugin sanitises and enqueues in ``<head>``, and sends the body separately. Every rule
+    is derived from ``model.design`` - the analyzed site's own palette, fonts and radius -
+    so the SAME analysis that chose the design tokens is what styles the published page.
+    """
+    pal = _palette(model.design)
+    head_font, body_font = _fonts(model.design)
+    dark = _is_dark(pal["background"])
+    # TEXT ON THE ACCENT depends on the ACCENT and on nothing else. Both of these used to
+    # also consult the page background, which made them wrong in two of the four
+    # combinations: a light accent on a light page got white text (a yellow button with
+    # white words on it), and a dark accent read as unparseable got dark text on a dark
+    # band. One rule, applied to one colour, is correct everywhere.
+    on_accent = "#ffffff" if _is_dark(pal["accent"]) else "#04141b"
+    return _CSS_TEMPLATE.format(
+        bg=pal["background"], text=pal["text"], head=pal["primary"], accent=pal["accent"],
+        muted=pal["secondary"], radius=_radius(model.design),
+        head_font=head_font, body_font=body_font,
+        alt=_mix(pal["background"], dark), line=_line(pal, dark),
+        card=_card_bg(pal["background"], dark), on_accent=on_accent,
+        accent_soft=_soft(pal["accent"]), shadow=("0 24px 60px -22px rgba(0,0,0,.5)" if dark else "0 24px 60px -22px rgba(15,23,42,.22)"),
+        cta_fg=on_accent,
+    )
+
+
+def model_body_html(model: PageModel) -> str:
+    """The rendered ``<main class="aios-doc">`` body ALONE - no ``<style>`` block.
+
+    The half of :func:`model_to_html` that survives a WordPress publish; pair it with
+    :func:`model_css` (see that docstring for why the two have to travel separately)."""
+    pal = _palette(model.design)
+    parts = [_section_html(s, pal) for s in model.sections if s.visible]
+    return '<main class="aios-doc">\n' + "\n".join(parts) + "\n</main>"
+
+
 def model_to_html(model: PageModel, *, fragment: bool = False) -> str:
     """Render the page model to premium, self-contained HTML. ``fragment=True`` returns
     just the ``<style>`` + ``<main>`` body (for embedding in the dashboard preview iframe
     or the WordPress body); otherwise a full standalone document."""
-    pal = _palette(model.design)
-    head_font, body_font = _fonts(model.design)
-    radius = _radius(model.design)
-    dark = _is_dark(pal["background"])
-    parts = [_section_html(s, pal) for s in model.sections if s.visible]
-    css = _CSS_TEMPLATE.format(
-        bg=pal["background"], text=pal["text"], head=pal["primary"], accent=pal["accent"],
-        muted=pal["secondary"], radius=radius, head_font=head_font, body_font=body_font,
-        alt=_mix(pal["background"], dark), line=_line(pal, dark),
-        card=_card_bg(pal["background"], dark), on_accent=("#04141b" if _is_dark(pal["accent"]) is False and dark else "#ffffff"),
-        accent_soft=_soft(pal["accent"]), shadow=("0 24px 60px -22px rgba(0,0,0,.5)" if dark else "0 24px 60px -22px rgba(15,23,42,.22)"),
-        cta_fg=("#04141b" if not _is_dark(pal["accent"]) else "#ffffff"),
-    )
-    body = f'<style>{css}</style>\n<main class="aios-doc">\n' + "\n".join(parts) + "\n</main>"
+    body = f'<style>{model_css(model)}</style>\n{model_body_html(model)}'
     if fragment:
         return body
     return (
@@ -595,6 +744,26 @@ def _btn(label: str, url: str, cls: str) -> str:
     return f'<a class="{cls}" href="{_esc(url or "#")}">{_esc(label)}</a>'
 
 
+def _columns(count: int) -> int:
+    """How many columns a grid of ``count`` cards should use.
+
+    THE RULE IS FEWEST ORPHANS, not "as many as will fit". Taking `min(count, 4)` looks
+    right until the count is five: four across and one alone on the next row, which reads
+    as a layout accident rather than as five things. MEASURED on a generated About page -
+    the writer returned five benefits and the page published 4 + 1.
+
+    Five is better as 3 + 2, seven as 4 + 3. Wider wins a tie, because a page of cards
+    reads better wide; and a single card gets its own centred width rather than stretching
+    across the full container.
+    """
+    if count <= 1:
+        return 1
+    if count <= 4:
+        return count
+    # Among 2, 3 and 4 columns, take the one whose last row is fullest; ties go wide.
+    return max((3, 2, 4), key=lambda c: ((count % c) or c, c))
+
+
 def _photo(im: Image, cls: str) -> str:
     if not im.url:
         return ""
@@ -615,10 +784,16 @@ def _section_html(s: Section, pal: dict[str, str]) -> str:
             _btn(b.get("label", ""), b.get("url", ""), "btn btn-primary" if i == 0 else "btn btn-ghost")
             for i, b in enumerate(d.get("buttons") or [])
         )
+        points = "".join(
+            f'<li data-aios-field="bullets.{i}">'
+            f'{_inline_html(str(b.get("text") if isinstance(b, dict) else b))}</li>'
+            for i, b in enumerate(d.get("bullets") or [])
+        )
+        bullets = f'<ul class="hero-points">{points}</ul>' if points else ""
         text = (
             f'<div class="hero-text"><h1 data-aios-field="heading">{_inline_html(s.heading)}</h1>'
             f'<p class="lede" data-aios-field="subhead">{_inline_html(str(d.get("subhead", "")))}</p>'
-            f'<div class="hero-cta">{buttons}</div></div>'
+            f'{bullets}<div class="hero-cta">{buttons}</div></div>'
         )
         if split:
             # Split hero: a LARGE photo (gpt-image) beside the copy; icon panel if no photo.
@@ -637,18 +812,34 @@ def _section_html(s: Section, pal: dict[str, str]) -> str:
             for i, c in enumerate(cards_data)
         )
         img = _photo(s.images[0], "band-visual") if has_photo else ""
-        n = min(len(cards_data), 4) or 3
+        n = _columns(len(cards_data))
         return (f'<section class="{cls} band" {attrs}><div class="wrap">'
                 f'<h2 class="sec-h" data-aios-field="heading">{_inline_html(s.heading)}</h2>{img}'
                 f'<div class="grid grid-{n}">{cards}</div></div></section>')
     if s.kind == "process":
-        items = "".join(
-            f'<li><span class="step-n">{i}</span><p data-aios-field="steps.{i-1}">{_inline_html(st)}</p></li>'
-            for i, st in enumerate(d.get("steps") or [], start=1)
+        # A step is EITHER a plain string (the legacy prose-derived shape) or a
+        # {title, text} pair (what the composer returns). Both render; the pair renders
+        # as a real step - a name you can scan and a sentence that says what happens in
+        # it - which is the difference between a process section and a numbered list.
+        steps_html: list[str] = []
+        for i, st in enumerate(d.get("steps") or [], start=1):
+            if isinstance(st, dict):
+                title = _inline_html(str(st.get("title", "")))
+                text = _inline_html(str(st.get("text", "")))
+                inner = (
+                    f'<div class="step-b"><h3 data-aios-field="steps.{i-1}.title">{title}</h3>'
+                    f'<p data-aios-field="steps.{i-1}.text">{text}</p></div>'
+                )
+            else:
+                inner = f'<div class="step-b"><p data-aios-field="steps.{i-1}">{_inline_html(str(st))}</p></div>'
+            steps_html.append(f'<li><span class="step-n">{i}</span>{inner}</li>')
+        intro = (
+            f'<p class="sec-sub" data-aios-field="intro">{_inline_html(str(d.get("intro", "")))}</p>'
+            if d.get("intro") else ""
         )
         return (f'<section class="{cls} band alt" {attrs}><div class="wrap">'
-                f'<h2 class="sec-h" data-aios-field="heading">{_inline_html(s.heading)}</h2>'
-                f'<ol class="steps">{items}</ol></div></section>')
+                f'<h2 class="sec-h" data-aios-field="heading">{_inline_html(s.heading)}</h2>{intro}'
+                f'<ol class="steps">{"".join(steps_html)}</ol></div></section>')
     if s.kind == "faq":
         items = "".join(
             f'<details><summary><span data-aios-field="faq.{i}.q">{_inline_html(f.get("q", ""))}</span>'
@@ -659,14 +850,144 @@ def _section_html(s: Section, pal: dict[str, str]) -> str:
         return (f'<section class="{cls} band alt" {attrs}><div class="wrap narrow">'
                 f'<h2 class="sec-h" data-aios-field="heading">{_inline_html(s.heading)}</h2>'
                 f'<div class="faq">{items}</div></div></section>')
-    if s.kind == "testimonials":
-        cards = "".join(
-            f'<figure class="quote"><blockquote data-aios-field="quotes.{i}">{_inline_html(q)}</blockquote></figure>'
-            for i, q in enumerate(d.get("quotes") or [])
+    if s.kind in ("testimonials", "reviews"):
+        # ONE RENDERER FOR BOTH. A service page calls them testimonials and a location
+        # page calls them reviews; both are quotes the client supplied, and the only
+        # difference is the heading above them. Drawing `reviews` here rather than letting
+        # it fall through to the prose renderer is what stopped a location page publishing
+        # a "Customer reviews" heading with blank space under it.
+        #
+        # ATTRIBUTION IS PART OF THE QUOTE. An unattributed testimonial is a sentence in
+        # quote marks, and a reader discounts it accordingly - so when the client supplied
+        # a name and a role, they render. When they did not, the quote stands alone rather
+        # than inventing a "- Satisfied Customer".
+        quote_cards: list[str] = []
+        for i, q in enumerate(d.get("quotes") or []):
+            if isinstance(q, dict):
+                quote, author, role = (
+                    str(q.get("quote", "")), str(q.get("author", "")), str(q.get("role", ""))
+                )
+            else:
+                quote, author, role = str(q), "", ""
+            who = ", ".join(x for x in (author, role) if x.strip())
+            cite = f'<figcaption data-aios-field="quotes.{i}.author">{_inline_html(who)}</figcaption>' if who else ""
+            quote_cards.append(
+                f'<figure class="quote"><blockquote data-aios-field="quotes.{i}">'
+                f"{_inline_html(quote)}</blockquote>{cite}</figure>"
+            )
+        n = _columns(len(quote_cards))
+        return (f'<section class="{cls} band" {attrs}><div class="wrap">'
+                f'<h2 class="sec-h" data-aios-field="heading">{_inline_html(s.heading)}</h2>'
+                f'<div class="grid grid-{n}">{"".join(quote_cards)}</div></div></section>')
+
+    if s.kind == "pricing":
+        tiers = d.get("tiers") or []
+        tier_cards: list[str] = []
+        for i, t in enumerate(tiers):
+            if not isinstance(t, dict):
+                continue
+            feats = "".join(
+                f"<li>{_inline_html(str(f))}</li>" for f in (t.get("features") or [])
+            )
+            feats_html = f'<ul class="tier-f">{feats}</ul>' if feats else ""
+            cta_label = str(t.get("cta_label") or "").strip()
+            button = _btn(cta_label, "#contact", "btn btn-primary sm") if cta_label else ""
+            tier_cards.append(
+                f'<article class="tier"><h3 data-aios-field="tiers.{i}.name">'
+                f'{_inline_html(str(t.get("name", "")))}</h3>'
+                f'<div class="tier-price" data-aios-field="tiers.{i}.price">'
+                f'{_inline_html(str(t.get("price", "")))}</div>'
+                f'<p data-aios-field="tiers.{i}.summary">{_inline_html(str(t.get("summary", "")))}</p>'
+                f"{feats_html}{button}</article>"
+            )
+        n = _columns(len(tier_cards))
+        return (f'<section class="{cls} band alt" {attrs}><div class="wrap">'
+                f'<h2 class="sec-h" data-aios-field="heading">{_inline_html(s.heading)}</h2>'
+                f'<div class="grid grid-{n} tiers">{"".join(tier_cards)}</div></div></section>')
+
+    if s.kind == "stats":
+        tiles = "".join(
+            f'<div class="stat"><span class="stat-v" data-aios-field="stats.{i}.value">'
+            f'{_inline_html(str(x.get("value", "")))}</span>'
+            f'<span class="stat-l" data-aios-field="stats.{i}.label">'
+            f'{_inline_html(str(x.get("label", "")))}</span></div>'
+            for i, x in enumerate(d.get("stats") or []) if isinstance(x, dict)
         )
         return (f'<section class="{cls} band" {attrs}><div class="wrap">'
                 f'<h2 class="sec-h" data-aios-field="heading">{_inline_html(s.heading)}</h2>'
-                f'<div class="grid grid-3">{cards}</div></div></section>')
+                f'<div class="stats">{tiles}</div></div></section>')
+
+    if s.kind == "team":
+        people_cards = "".join(
+            f'<article class="card person"><h3 data-aios-field="people.{i}.name">'
+            f'{_inline_html(str(p.get("name", "")))}</h3>'
+            f'<div class="role" data-aios-field="people.{i}.role">'
+            f'{_inline_html(str(p.get("role", "")))}</div>'
+            f'<p data-aios-field="people.{i}.bio">{_inline_html(str(p.get("bio", "")))}</p></article>'
+            for i, p in enumerate(d.get("people") or []) if isinstance(p, dict)
+        )
+        n = _columns(len(d.get("people") or []))
+        return (f'<section class="{cls} band alt" {attrs}><div class="wrap">'
+                f'<h2 class="sec-h" data-aios-field="heading">{_inline_html(s.heading)}</h2>'
+                f'<div class="grid grid-{n}">{people_cards}</div></div></section>')
+
+    if s.kind == "service_areas":
+        chips = "".join(
+            f'<span class="area">{_inline_html(str(a.get("name") if isinstance(a, dict) else a))}</span>'
+            for a in (d.get("areas") or [])
+        )
+        intro = (
+            f'<p class="sec-sub" data-aios-field="intro">{_inline_html(str(d.get("intro", "")))}</p>'
+            if d.get("intro") else ""
+        )
+        return (f'<section class="{cls} band" {attrs}><div class="wrap">'
+                f'<h2 class="sec-h" data-aios-field="heading">{_inline_html(s.heading)}</h2>{intro}'
+                f'<div class="areas">{chips}</div></div></section>')
+
+    if s.kind == "contact":
+        # THE BUSINESS'S REAL DETAILS, each line present only when the client gave it.
+        # A contact block that prints an empty "Phone:" label is worse than one that
+        # simply does not mention a phone - it reads as a page that lost its data.
+        rows = "".join(
+            f'<div class="nap-row"><span class="nap-k">{label}</span>'
+            f'<span class="nap-v" data-aios-field="{key}">{_inline_html(str(d[key]))}</span></div>'
+            for key, label in (
+                ("address", "Address"), ("phone", "Phone"),
+                ("email", "Email"), ("hours", "Hours"),
+            )
+            if str(d.get(key) or "").strip()
+        )
+        if not rows:
+            return ""
+        name = (
+            f'<p class="nap-name" data-aios-field="name">{_inline_html(str(d.get("name", "")))}</p>'
+            if d.get("name") else ""
+        )
+        return (f'<section class="{cls} band alt" {attrs}><div class="wrap narrow">'
+                f'<h2 class="sec-h" data-aios-field="heading">{_inline_html(s.heading)}</h2>'
+                f'<div class="nap">{name}{rows}</div></div></section>')
+    if s.kind == "related":
+        items = "".join(
+            f'<li><a href="{_esc(str(x.get("url", "")))}" '
+            f'data-aios-field="links.{i}">{_inline_html(str(x.get("label", "")))}</a></li>'
+            for i, x in enumerate(d.get("links") or []) if isinstance(x, dict)
+        )
+        if not items:
+            return ""
+        return (f'<section class="{cls} band" {attrs}><div class="wrap narrow">'
+                f'<h2 class="sec-h" data-aios-field="heading">{_inline_html(s.heading)}</h2>'
+                f'<ul class="related">{items}</ul></div></section>')
+    if s.kind == "proof" and d.get("points"):
+        rows = "".join(
+            f'<li><p class="claim" data-aios-field="points.{i}.claim">'
+            f'{_inline_html(str(p.get("claim", "")))}</p>'
+            f'<span class="src" data-aios-field="points.{i}.source">'
+            f'{_inline_html(str(p.get("source", "")))}</span></li>'
+            for i, p in enumerate(d.get("points") or []) if isinstance(p, dict)
+        )
+        return (f'<section class="{cls} band alt" {attrs}><div class="wrap narrow">'
+                f'<h2 class="sec-h" data-aios-field="heading">{_inline_html(s.heading)}</h2>'
+                f'<ul class="proof">{rows}</ul></div></section>')
     if s.kind == "cta":
         btn = d.get("button") or {}
         return (f'<section class="{cls} cta" {attrs}><div class="wrap">'
@@ -683,20 +1004,49 @@ def _section_html(s: Section, pal: dict[str, str]) -> str:
 
 
 _CSS_TEMPLATE = (
-    "*{{box-sizing:border-box}}.aios-doc{{margin:0;color:{text};background:{bg};"
+    # NOTHING MAY PUSH THE PAGE WIDER THAN THE SCREEN. A generated page is published to
+    # somebody else's theme and read mostly on a phone; a single unshrinkable child - a
+    # long unbroken word, a grid that did not collapse, an image without a max-width -
+    # makes the whole document scroll sideways, and every heading gets cut off at the
+    # right edge. MEASURED at 390px after a specificity mistake left the hero at two
+    # columns: the text was clipped mid-word down the entire page.
+    "*{{box-sizing:border-box}}"
+    ".aios-doc{{overflow-x:hidden;max-width:100%;margin:0;color:{text};background:{bg};"
     "font-family:{body_font};line-height:1.6;font-size:17px;-webkit-font-smoothing:antialiased}}"
     ".aios-doc img{{max-width:100%;display:block}}"
     ".aios-doc .wrap{{max-width:1160px;margin:0 auto;padding:0 28px}}.aios-doc .wrap.narrow{{max-width:820px}}"
     ".aios-doc h1,.aios-doc h2,.aios-doc h3{{font-family:{head_font};color:{head};font-weight:800;letter-spacing:-.02em;line-height:1.1}}"
+    # THE TYPEFACE, RESTATED ON THE ELEMENTS THEMSELVES.
+    #
+    # `.aios-doc {{font-family}}` alone sets the family once and lets it inherit, which is
+    # correct CSS and not enough on somebody else's WordPress: a theme that styles its
+    # text elements DIRECTLY (`h2 {{font-family:...}}`, `.entry-content p {{...}}`) beats an
+    # inherited value, because inheritance loses to any rule that matches the element.
+    # MEASURED on a live site whose theme sets its own font on every heading - the page
+    # published carrying the client's design system and rendered in the theme's typeface.
+    #
+    # Restating it at `.aios-doc <element>` (0,1,1) outranks a bare element selector and a
+    # single-class one, so the design wins on a normal theme. A theme using `!important`
+    # still wins, and that is the correct place to stop: overriding an author's explicit
+    # !important would make OUR page the one nobody can restyle.
+    ".aios-doc h4,.aios-doc h5,.aios-doc h6{{font-family:{head_font}}}"
+    ".aios-doc p,.aios-doc li,.aios-doc a,.aios-doc span,.aios-doc div,"
+    ".aios-doc figcaption,.aios-doc blockquote,.aios-doc summary,.aios-doc details,"
+    ".aios-doc strong,.aios-doc em,.aios-doc button{{font-family:{body_font}}}"
     ".aios-doc a{{color:{accent};text-decoration:none}}"
     ".aios-doc .btn{{display:inline-block;padding:14px 26px;border-radius:{radius}px;font-weight:600;font-size:15px;border:2px solid transparent}}"
     ".aios-doc .btn-primary{{background:{accent};color:{on_accent}}}"
     ".aios-doc .btn-ghost{{background:transparent;color:{text};border-color:{line}}}"
     ".aios-doc .btn-invert{{background:{bg};color:{accent}}}"
     ".aios-doc .hero{{padding:76px 0 60px;border-bottom:1px solid {line}}}"
-    ".aios-doc .hero .wrap{{display:grid;grid-template-columns:1fr 1.04fr;gap:56px;align-items:center}}"
+    ".aios-doc .hero .wrap{{display:grid;gap:56px;align-items:center}}"
+    # THE SPLIT HERO'S COLUMNS, NAMED. This used to be the unnamed default on
+    # `.hero .wrap`, with `.centered` as the only modifier - so the markup carried a
+    # `split` class that matched no rule at all. A class nobody can find the rule for is
+    # a class the next person deletes, and the hero silently becomes one column.
+    ".aios-doc .hero.split .wrap{{grid-template-columns:1fr 1.04fr}}"
     ".aios-doc .hero.centered .wrap{{grid-template-columns:1fr;text-align:center;max-width:1000px}}"
-    ".aios-doc .hero h1{{font-size:56px;margin:.1em 0 .35em}}"
+    ".aios-doc .hero h1{{font-size:clamp(34px,3.4vw,52px);margin:.1em 0 .35em;text-wrap:balance}}"
     ".aios-doc .hero .lede{{font-size:20px;color:{muted};margin:0}}.aios-doc .hero.centered .lede{{margin:0 auto;max-width:46ch}}"
     ".aios-doc .hero-cta{{display:flex;gap:14px;margin-top:28px;flex-wrap:wrap}}.aios-doc .hero.centered .hero-cta{{justify-content:center}}"
     ".aios-doc .hero-visual img{{border-radius:22px;box-shadow:{shadow};width:100%;min-height:440px;aspect-ratio:4/3;object-fit:cover}}"
@@ -705,6 +1055,19 @@ _CSS_TEMPLATE = (
     ".aios-doc .band-visual img,.aios-doc .prose-visual img{{border-radius:18px;box-shadow:{shadow};aspect-ratio:16/9;object-fit:cover;margin:0 auto 30px}}"
     ".aios-doc .sec-h{{font-size:38px;text-align:center;margin:0 0 42px}}.aios-doc .sec-h.left{{text-align:left;margin-bottom:18px}}"
     ".aios-doc .grid{{display:grid;gap:22px}}.aios-doc .grid-2{{grid-template-columns:repeat(2,1fr)}}"
+    # A grid of ONE. The card count is measured from the data, so a client who supplied a
+    # single price tier or a single testimonial gets `grid-1` - and without a rule that
+    # lone card stretched the full 1160px content width, which reads as a layout accident
+    # rather than as one plan. Centered at a card's natural width instead.
+    ".aios-doc .grid-1{{grid-template-columns:minmax(0,440px);justify-content:center}}"
+    # The hero's copy column. `min-width:0` is not cosmetic: a grid item's default
+    # `min-width:auto` refuses to shrink below its longest unbreakable word, so one long
+    # headline word or URL pushed the hero photo off the right edge of the page.
+    ".aios-doc .hero-text{{min-width:0}}"
+    # Wide enough for a headline, not the full 1160px. `ch` here is measured against the
+    # container's BODY size, not the h1's, so a value picked to read well for a paragraph
+    # squeezes a 52px headline into three ragged lines - which is what 44ch did.
+    ".aios-doc .hero.centered .hero-text{{max-width:880px;margin:0 auto}}"
     ".aios-doc .grid-3{{grid-template-columns:repeat(3,1fr)}}.aios-doc .grid-4{{grid-template-columns:repeat(4,1fr)}}"
     ".aios-doc .card{{background:{card};border:1px solid {line};border-radius:18px;padding:30px 26px;transition:transform .15s,box-shadow .15s,border-color .15s}}"
     ".aios-doc .card:hover{{transform:translateY(-3px);box-shadow:{shadow};border-color:{accent}}}"
@@ -715,14 +1078,59 @@ _CSS_TEMPLATE = (
     ".aios-doc .steps li{{display:flex;gap:20px;align-items:flex-start;background:{card};border:1px solid {line};border-radius:16px;padding:20px 24px}}"
     ".aios-doc .step-n{{flex:0 0 auto;width:40px;height:40px;border-radius:50%;background:{accent};color:{on_accent};font-weight:800;display:grid;place-items:center}}"
     ".aios-doc .steps p{{margin:6px 0 0}}"
-    ".aios-doc .quote{{margin:0;background:{card};border:1px solid {line};border-radius:18px;padding:26px}}"
+    ".aios-doc .step-b h3{{margin:0 0 4px;font-size:18px}}.aios-doc .step-b p{{margin:0;color:{muted};font-size:15px}}"
+    ".aios-doc .sec-sub{{text-align:center;color:{muted};font-size:17px;max-width:62ch;margin:-28px auto 36px}}"
+    ".aios-doc .quote{{margin:0;background:{card};border:1px solid {line};border-radius:18px;padding:26px;"
+    "display:flex;flex-direction:column;gap:14px}}"
     ".aios-doc .quote blockquote{{margin:0;font-size:17px;line-height:1.55}}"
+    ".aios-doc .quote figcaption{{color:{muted};font-size:14px;font-weight:600;margin-top:auto}}"
+    # --- pricing tiers: the card the eye compares across, so the price is the biggest
+    # thing in it and every card is the same height.
+    ".aios-doc .tiers .tier{{background:{card};border:1px solid {line};border-radius:18px;padding:30px 26px;"
+    "display:flex;flex-direction:column;gap:12px}}"
+    ".aios-doc .tier h3{{margin:0;font-size:20px}}"
+    ".aios-doc .tier-price{{font-family:{head_font};font-size:38px;font-weight:800;color:{accent};line-height:1}}"
+    ".aios-doc .tier p{{margin:0;color:{muted};font-size:15px}}"
+    ".aios-doc .tier-f{{list-style:none;padding:0;margin:6px 0 0;display:grid;gap:8px;font-size:15px;color:{muted}}}"
+    ".aios-doc .tier-f li{{padding-left:22px;position:relative}}"
+    ".aios-doc .tier-f li:before{{content:'';position:absolute;left:0;top:7px;width:12px;height:7px;"
+    "border-left:2px solid {accent};border-bottom:2px solid {accent};transform:rotate(-45deg)}}"
+    ".aios-doc .btn.sm{{padding:10px 18px;font-size:14px;margin-top:auto;text-align:center}}"
+    # --- stat tiles + team + areas + proof
+    ".aios-doc .stats{{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:22px}}"
+    ".aios-doc .stat{{background:{card};border:1px solid {line};border-radius:18px;padding:28px 24px;text-align:center}}"
+    ".aios-doc .stat-v{{display:block;font-family:{head_font};font-size:44px;font-weight:800;color:{accent};line-height:1}}"
+    ".aios-doc .stat-l{{display:block;margin-top:8px;color:{muted};font-size:15px}}"
+    ".aios-doc .person .role{{color:{accent};font-weight:600;font-size:14px;margin-bottom:8px}}"
+    ".aios-doc .areas{{display:flex;flex-wrap:wrap;gap:10px;justify-content:center}}"
+    ".aios-doc .area{{padding:10px 18px;border:1px solid {line};border-radius:999px;background:{card};"
+    "font-size:15px;color:{head};font-weight:600}}"
+    ".aios-doc .proof{{list-style:none;padding:0;margin:0;display:grid;gap:14px}}"
+    ".aios-doc .proof li{{background:{card};border:1px solid {line};border-left:3px solid {accent};"
+    "border-radius:14px;padding:18px 22px}}"
+    ".aios-doc .proof .claim{{margin:0 0 6px;font-weight:600}}"
+    ".aios-doc .proof .src{{color:{muted};font-size:14px}}"
+    ".aios-doc .hero-points{{list-style:none;padding:0;margin:22px 0 0;display:grid;gap:10px}}"
+    ".aios-doc .hero-points li{{display:flex;gap:10px;align-items:flex-start;color:{muted};font-size:16px}}"
+    ".aios-doc .hero-points li:before{{content:'';flex:0 0 auto;margin-top:7px;width:12px;height:7px;"
+    "border-left:2px solid {accent};border-bottom:2px solid {accent};transform:rotate(-45deg)}}"
+    ".aios-doc .hero.centered .hero-points{{max-width:44ch;margin-left:auto;margin-right:auto;text-align:left}}"
     ".aios-doc .prose-split{{display:grid;grid-template-columns:1fr 1fr;gap:44px;align-items:center}}"
     ".aios-doc .prose-text p{{color:{muted};font-size:17px}}"
     ".aios-doc .faq details{{border:1px solid {line};border-radius:14px;margin-bottom:12px;background:{card};overflow:hidden}}"
     ".aios-doc .faq summary{{list-style:none;cursor:pointer;padding:20px 22px;font-weight:700;color:{head};font-size:17px;display:flex;justify-content:space-between}}"
     ".aios-doc .faq summary::-webkit-details-marker{{display:none}}.aios-doc .faq .chev{{color:{accent};font-size:22px}}"
     ".aios-doc .faq details[open] .chev{{transform:rotate(45deg)}}.aios-doc .faq .ans{{padding:0 22px 20px;color:{muted}}}.aios-doc .faq .ans p{{margin:0}}"
+    ".aios-doc .nap{{max-width:560px;margin:0 auto;background:{card};border:1px solid {line};border-radius:18px;padding:28px 30px}}"
+    ".aios-doc .nap-name{{margin:0 0 14px;font-weight:700;font-size:19px;font-family:{head_font}}}"
+    ".aios-doc .nap-row{{display:flex;gap:16px;padding:10px 0;border-top:1px solid {line}}}"
+    ".aios-doc .nap-row:first-of-type{{border-top:0}}"
+    ".aios-doc .nap-k{{flex:0 0 90px;color:{muted};font-size:14px;font-weight:600}}"
+    ".aios-doc .nap-v{{font-size:15px}}"
+    ".aios-doc .related{{list-style:none;padding:0;margin:0;display:grid;gap:10px;max-width:640px;margin-inline:auto}}"
+    ".aios-doc .related li{{background:{card};border:1px solid {line};border-radius:14px}}"
+    ".aios-doc .related a{{display:block;padding:16px 20px;font-weight:600;font-size:16px}}"
+    ".aios-doc .related a:hover{{border-color:{accent}}}"
     ".aios-doc .cta{{background:{accent};color:{cta_fg};text-align:center;padding:80px 0}}"
     ".aios-doc .cta h2{{font-size:40px;margin:0 0 14px;color:{cta_fg}}}.aios-doc .cta p{{font-size:19px;opacity:.92;max-width:52ch;margin:0 auto 28px}}"
     ".aios-doc .brandpanel{{background:linear-gradient(160deg,{accent_soft},transparent);border:1px solid {line};"
@@ -736,7 +1144,46 @@ _CSS_TEMPLATE = (
     ".aios-doc .frow-item{{display:flex;align-items:center;gap:10px;padding:12px 18px;border:1px solid {line};"
     "border-radius:999px;background:{card};color:{head};font-weight:600;font-size:15px}}"
     ".aios-doc .ic-md{{width:20px;height:20px;color:{accent}}}"
-    "@media(max-width:860px){{.aios-doc .hero .wrap,.aios-doc .prose-split{{grid-template-columns:1fr}}"
+    # TABLET. The hero and the split prose stop being two columns; the wide grids halve.
+    "@media(max-width:860px){{.aios-doc .hero.split .wrap,.aios-doc .hero .wrap,"
+    ".aios-doc .prose-split{{grid-template-columns:1fr}}"
     ".aios-doc .grid-3,.aios-doc .grid-4{{grid-template-columns:1fr 1fr}}.aios-doc .hero h1{{font-size:38px}}"
     ".aios-doc .hero-visual img{{min-height:300px}}}}"
+    # PHONE, AND THIS BREAKPOINT WAS MISSING ENTIRELY.
+    #
+    # Below 860px everything collapsed to two columns and then STOPPED. On a 390px phone
+    # that left every card grid, every price tier, every stat tile and every quote two
+    # abreast at roughly 160px each - a column narrower than the words in it - and the
+    # areas chips, the numbered steps and the contact rows at desktop proportions. More
+    # than half of the traffic to a client's page arrives on that layout, and it is the
+    # half nobody screenshots.
+    #
+    # One column for anything built out of cards, and the ornamental widths (the step
+    # number, the NAP label column) stand down so the text gets the room.
+    "@media(max-width:620px){{"
+    ".aios-doc{{font-size:16px}}"
+    ".aios-doc .wrap{{padding:0 20px}}"
+    ".aios-doc .hero.split .wrap{{grid-template-columns:1fr}}"
+    ".aios-doc .grid,.aios-doc .grid-1,.aios-doc .grid-2,.aios-doc .grid-3,.aios-doc .grid-4"
+    "{{grid-template-columns:1fr}}"
+    ".aios-doc .stats{{grid-template-columns:repeat(2,1fr)}}"
+    ".aios-doc .hero{{padding:52px 0 44px}}"
+    ".aios-doc .hero h1{{font-size:clamp(28px,7.5vw,34px)}}"
+    ".aios-doc .hero .lede{{font-size:17px}}"
+    ".aios-doc .hero-cta{{flex-direction:column;align-items:stretch}}"
+    ".aios-doc .hero-cta .btn{{text-align:center}}"
+    ".aios-doc .hero-visual img{{min-height:220px}}"
+    ".aios-doc .band{{padding:52px 0}}"
+    ".aios-doc .sec-h{{font-size:28px;margin-bottom:28px}}"
+    ".aios-doc .sec-sub{{margin:-18px auto 26px;font-size:16px}}"
+    ".aios-doc .card{{padding:24px 20px}}"
+    ".aios-doc .steps li{{gap:14px;padding:18px 18px}}"
+    ".aios-doc .step-n{{width:32px;height:32px;font-size:14px}}"
+    ".aios-doc .cta{{padding:56px 0}}.aios-doc .cta h2{{font-size:28px}}"
+    ".aios-doc .cta p{{font-size:17px}}"
+    ".aios-doc .nap-row{{flex-direction:column;gap:2px}}"
+    ".aios-doc .nap-k{{flex:none}}"
+    ".aios-doc .tier-price{{font-size:30px}}"
+    ".aios-doc .stat-n{{font-size:34px}}"
+    "}}"
 )

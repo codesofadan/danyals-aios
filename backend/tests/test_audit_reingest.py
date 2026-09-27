@@ -31,11 +31,30 @@ pytestmark = pytest.mark.unit
 
 
 class _Ingested:
-    def __init__(self, pages: int, findings: int, instances: int) -> None:
+    """Stands in for `audit_ingest.IngestResult`.
+
+    `crawl_verdict`/`crawl_note` are part of that contract (0160) and the rebuild
+    forwards them into the report so a rebuilt deliverable opens with the same
+    "we were blocked at the door" banner a fresh one would. A fake missing them
+    made the report build raise AttributeError, which the rebuild dutifully
+    reported as a failed half - the fake was wrong, not the code.
+    """
+
+    def __init__(
+        self,
+        pages: int,
+        findings: int,
+        instances: int,
+        *,
+        crawl_verdict: str = "ok",
+        crawl_note: str = "",
+    ) -> None:
         self.pages = pages
         self.findings = findings
         self.instances = instances
         self.truncated = False
+        self.crawl_verdict = crawl_verdict
+        self.crawl_note = crawl_note
 
 
 class _Store:

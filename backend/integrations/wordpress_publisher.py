@@ -33,6 +33,7 @@ layer composes with the vault lookup.
 
 from __future__ import annotations
 
+import base64
 import hashlib
 from dataclasses import dataclass
 from typing import Any, Protocol, runtime_checkable
@@ -200,6 +201,37 @@ class WordPressPluginPublisher(HttpProviderClient):
             return {}
         caps = data.get("capabilities")
         return dict(caps) if isinstance(caps, dict) else {}
+
+    def upload_media(
+        self, data: bytes, *, filename: str, content_type: str, alt: str = ""
+    ) -> str:
+        """Push ONE image to the site BY VALUE and return its URL there, or ``""``.
+
+        THE ALTERNATIVE TO HOPING THE CLIENT'S SERVER CAN REACH OURS. Every other image
+        path sends a URL for WordPress to fetch, which works in production and cannot work
+        from a laptop, a private network or anything behind a VPN - and fails SILENTLY,
+        because the plugin treats a failed sideload as best-effort and leaves the ``<img>``
+        pointing at an address no visitor can load. The page publishes looking finished
+        with its pictures missing.
+
+        Never raises: an older plugin has no ``/media`` route, and a page published with
+        remote image URLs is the previous behaviour, not a new failure. The caller checks
+        the returned URL and falls back.
+        """
+        body = {
+            "api_key": self._api_key,
+            "filename": filename,
+            "content_type": content_type,
+            "alt": alt,
+            "data_base64": base64.b64encode(data).decode("ascii"),
+        }
+        try:
+            result = self.request_json("POST", self._endpoint("media"), json_body=body)
+        except ProviderCallError:
+            return ""
+        if result.get("ok") is not True:
+            return ""
+        return str(result.get("url") or "")
 
     def publish(self, payload: dict[str, Any]) -> PluginPublishResult:
         """Push a content payload to the plugin and return its result.

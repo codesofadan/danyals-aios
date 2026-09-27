@@ -116,6 +116,24 @@ HARD_GATE_DIMENSIONS: frozenset[str] = frozenset(
 # numbers AND these constants together.
 MIN_DIMENSION_SCORE = 70          # §11: no single dimension may fall below this
 WEIGHTED_TOTAL_THRESHOLD = 85     # §11: the weighted total must reach this to pass
+
+#: A sub-scorer's way of saying "there was nothing to measure here" - distinct from a
+#: score of 0 (measured, and bad) and from 100 (measured, and perfect).
+#:
+#: WHY THIS EXISTS. ``_score_entity_coverage`` used to return **100** when the teardown
+#: produced no table-stakes entities, reasoned as "nothing is required, so full marks".
+#: Measured on a real run (CJ-4347): the research stage degraded, so no competitor pages
+#: were fetched, so there were no entities - and an 8%-weighted dimension contributed a
+#: perfect score for having learned nothing, lifting the weighted total that decides
+#: whether a page is worth a reviewer's time. Before that, the same dimension scored 100
+#: against a table-stakes list of ``['The', 'This', 'You']``, which any English draft
+#: contains. Either way the number was a tautology.
+#:
+#: The audit engine already settled the right answer for this exact shape: its aggregator
+#: DROPS an ``n_a`` verdict from the weighted mean rather than scoring it, so an
+#: unmeasured check "leaves the composite instead of dragging it down". Same rule here -
+#: the weight is renormalised over the dimensions actually measured.
+UNMEASURED = -1
 HARD_GATE_FLOOR = 70              # a critical dim below this hard-blocks (== the per-dim min)
 PROVISIONAL = True                # every score this module emits is R4-provisional
 
@@ -172,7 +190,23 @@ _NON_DIGIT_RE = re.compile(r"\D")
 # The word-boundary anchors keep hex/id fragments (e.g. "a1b2c3f0") from matching.
 _MONEY_RE = re.compile(r"\$\s?\d[\d,]*(?:\.\d+)?")
 _PERCENT_RE = re.compile(r"\d+(?:\.\d+)?\s?%")
-_NUMBER_RE = re.compile(r"(?<![\w$])\d{2,}(?:,\d{3})*(?:\.\d+)?(?![\w%])")
+# THE THOUSANDS SEPARATOR, and why the first version of this silently let figures through.
+#
+# It read `\d{2,}(?:,\d{3})*`, which requires TWO digits before the first comma. A number
+# written the way people write it - "4,120 repairs", "1,800 a month", "9,500 members" - has
+# ONE, so the leading group never matched and the pattern instead matched the "120" AFTER
+# the comma. Two consequences, both silent:
+#
+#   * the gate audited "120" and passed the sentence whenever any supplied fact happened to
+#     contain those three digits; and
+#   * `grounding.unsourced_figures` computes "4120" from the same text and looks it up in
+#     this audit set, does not find it, and skips the figure ENTIRELY - so an invented
+#     4,120 was never flagged by the one check whose job is invented numbers.
+#
+# Alternation rather than a quantifier tweak: a grouped number and a plain one have
+# genuinely different shapes, and a single digit is only a quantity claim when it is
+# grouped ("4,120" yes; "4" no).
+_NUMBER_RE = re.compile(r"(?<![\w$])(?:\d{1,3}(?:,\d{3})+|\d{2,})(?:\.\d+)?(?![\w%])")
 
 
 # --------------------------------------------------------------------------- #
@@ -223,6 +257,11 @@ class QaScore:
     blocked_by: list[str]
     provisional: bool = True
     notes: list[str] = field(default_factory=list)
+    #: Dimensions that could not be measured at all (see :data:`UNMEASURED`). They are
+    #: reported as 0 in ``dimensions`` and EXCLUDED from ``weighted_total``, the
+    #: per-dimension floor and ``blocked_by`` - so a reader must consult this list
+    #: before treating any of those zeroes as a finding about the page.
+    unmeasured: list[str] = field(default_factory=list)
 
 
 # --------------------------------------------------------------------------- #
@@ -367,11 +406,19 @@ def _grounded_corpus_digits(content: GeneratedContent, source_pack: SourcePack) 
 # Deterministic sub-scorers -> (score, notes)
 # --------------------------------------------------------------------------- #
 def _score_entity_coverage(content: GeneratedContent, brief: ResearchBrief) -> tuple[int, list[str]]:
-    """§11.5: the fraction of the teardown's table-stakes entities the draft
-    covers. No table-stakes to cover => full marks (nothing is required)."""
+    """§11.5: the fraction of the teardown's table-stakes entities the draft covers.
+
+    No table-stakes => :data:`UNMEASURED`, NOT full marks. An empty expectation means the
+    teardown told us nothing (the research stage degraded, or every candidate entity was
+    filtered as a non-entity); awarding 100 for that is a tautology that inflates the
+    weighted total. The roll-up excludes it instead.
+    """
     table_stakes = list(brief.teardown.table_stakes_entities)
     if not table_stakes:
-        return 100, []
+        return UNMEASURED, [
+            "no table-stakes entities from the teardown, so coverage was NOT measured "
+            "(excluded from the weighted total rather than scored)"
+        ]
     covered, missing = _covered_entities(content.draft_md, table_stakes)
     score = _clamp_score(100 * len(covered) / len(table_stakes))
     notes = [f"missing table-stakes entities: {', '.join(missing)}"] if missing else []
@@ -818,9 +865,19 @@ def score(
     """
     notes: list[str] = []
     dimensions: dict[str, int] = {}
+    #: Dimensions a scorer could not measure. Excluded from the weighted total, the
+    #: per-dimension floor and the hard gates - see :data:`UNMEASURED`.
+    unmeasured: list[str] = []
 
     def record(dimension: str, result: tuple[int, list[str]]) -> None:
         value, reasons = result
+        if value == UNMEASURED:
+            unmeasured.append(dimension)
+            # 0 on the wire, never 100: the field is typed `int`, and a reader who
+            # ignores `unmeasured` must not be shown a perfect score for a
+            # measurement that never happened. `unmeasured` + the note carry the
+            # meaning, and every aggregate below skips the dimension entirely.
+            value = 0
         dimensions[dimension] = value
         notes.extend(f"{dimension}: {reason}" for reason in reasons)
 
@@ -849,16 +906,33 @@ def score(
     )
     record("originality", _score_originality(content, judge))
 
-    # The weighted roll-up (PROVISIONAL R4 weights; sums to 1.0).
+    # The weighted roll-up (PROVISIONAL R4 weights; sums to 1.0), RENORMALISED over the
+    # dimensions actually measured. Leaving an unmeasured dimension in at 0 would punish
+    # the page for a provider degrade it did not cause; leaving it in at 100 was the
+    # original defect. Dropping it and rescaling is the only option that reports the
+    # quality of what was measured.
+    measured = [dim for dim in QA_DIMENSIONS if dim not in unmeasured]
+    weight_sum = sum(DIMENSION_WEIGHTS[dim] for dim in measured)
     weighted_total = _clamp_score(
-        sum(dimensions[dim] * DIMENSION_WEIGHTS[dim] for dim in QA_DIMENSIONS)
+        sum(dimensions[dim] * DIMENSION_WEIGHTS[dim] for dim in measured) / weight_sum
+        if weight_sum > 0
+        else 0
     )
+    if unmeasured:
+        notes.append(
+            f"weighted total covers {len(measured)} of {len(QA_DIMENSIONS)} dimensions; "
+            f"not measured: {', '.join(sorted(unmeasured))}"
+        )
 
-    # Hard gates: a critical dim below the floor blocks regardless of the total.
+    # Hard gates: a critical dim below the floor blocks regardless of the total. An
+    # unmeasured dimension cannot block - there is no finding to block on.
     blocked_by = sorted(
-        dim for dim in HARD_GATE_DIMENSIONS if dimensions[dim] < HARD_GATE_FLOOR
+        dim for dim in HARD_GATE_DIMENSIONS
+        if dim not in unmeasured and dimensions[dim] < HARD_GATE_FLOOR
     )
-    below_min = [dim for dim in QA_DIMENSIONS if dimensions[dim] < MIN_DIMENSION_SCORE]
+    below_min = [
+        dim for dim in measured if dimensions[dim] < MIN_DIMENSION_SCORE
+    ]
     passed = (
         not blocked_by
         and not below_min
@@ -876,6 +950,7 @@ def score(
         blocked_by=blocked_by,
         provisional=PROVISIONAL,
         notes=notes,
+        unmeasured=sorted(unmeasured),
     )
 
 

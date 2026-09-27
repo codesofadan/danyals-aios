@@ -40,6 +40,52 @@ class AuditsRepo:
             cur.execute("select * from public.audits where id = %s limit 1", (audit_id,))
             return cur.fetchone()
 
+    def previous_audit(self, audit_id: str) -> dict[str, Any] | None:
+        """The completed audit of the SAME SITE immediately before this one.
+
+        What "the same site" means here is the audited URL as stored, not the client: the
+        comparison is about a site's own history, and an agency legitimately audits a
+        prospect's site before that prospect is a client - so keying on the client would
+        make the first month of every engagement incomparable to the audit that won it.
+
+        Only ``done`` runs qualify. A failed or queued run has no findings to compare, and
+        offering one as the baseline would produce a delta claiming every problem was
+        fixed. RLS-scoped, so a caller who cannot see the earlier audit gets nothing rather
+        than a comparison against a row they may not read.
+        """
+        with rls_connection(self._user_id) as cur:
+            cur.execute(
+                """select prev.* from public.audits prev
+                   join public.audits cur on cur.id = %s
+                   where prev.url = cur.url
+                     and prev.id <> cur.id
+                     and prev.status = 'done'
+                     and prev.created_at < cur.created_at
+                   order by prev.created_at desc
+                   limit 1""",
+                (audit_id,),
+            )
+            return cur.fetchone()
+
+    def audits_of_same_site(self, audit_id: str, *, limit: int = 20) -> _Rows:
+        """Every completed audit of this audit's site, newest first (for the run picker).
+
+        Includes the audit itself, so a UI can render "compare with" from one call and show
+        which row is the current one without a second query.
+        """
+        with rls_connection(self._user_id) as cur:
+            cur.execute(
+                """select prev.id, prev.created_at, prev.depth, prev.tier, prev.score,
+                          prev.status
+                   from public.audits prev
+                   join public.audits cur on cur.id = %s
+                   where prev.url = cur.url and prev.status = 'done'
+                   order by prev.created_at desc
+                   limit %s""",
+                (audit_id, limit),
+            )
+            return cur.fetchall()
+
     def set_visibility(self, audit_id: str, *, visible: bool) -> dict[str, Any] | None:
         """Share this audit with the client's portal, or stop sharing it.
 
@@ -69,8 +115,8 @@ class AuditsRepo:
         """
         with rls_connection(self._user_id) as cur:
             cur.execute(
-                "select slug, kind, published from public.public_audit_pages "
-                "where audit_id = %s limit 1",
+                "select slug, kind, published, views, last_viewed_at, expires_at "
+                "from public.public_audit_pages where audit_id = %s limit 1",
                 (audit_id,),
             )
             return cur.fetchone()
@@ -109,8 +155,28 @@ class AuditsRepo:
         with rls_connection(self._user_id) as cur:
             cur.execute(
                 "update public.public_audit_pages set published = %s "
-                "where audit_id = %s returning slug, kind, published",
+                "where audit_id = %s "
+                "returning slug, kind, published, views, last_viewed_at, expires_at",
                 (published, audit_id),
+            )
+            return cur.fetchone()
+
+    def set_public_page_expiry(
+        self, audit_id: str, *, expires_at: Any | None
+    ) -> dict[str, Any] | None:
+        """Set (or clear, with ``None``) when this audit's public link stops resolving.
+
+        Separate from ``set_published`` because they are different decisions: publishing
+        opens a link to anyone holding it, and an expiry bounds how long that stays true.
+        An operator routinely does the first without the second, and pairing them in one
+        write would make "publish" silently reset an expiry somebody had set.
+        """
+        with rls_connection(self._user_id) as cur:
+            cur.execute(
+                "update public.public_audit_pages set expires_at = %s "
+                "where audit_id = %s "
+                "returning slug, kind, published, views, last_viewed_at, expires_at",
+                (expires_at, audit_id),
             )
             return cur.fetchone()
 

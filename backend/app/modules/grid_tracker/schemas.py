@@ -35,6 +35,8 @@ __all__ = [
     "GridPointResponse",
     "GridRunDetail",
     "GridRunResponse",
+    "MapsUrlPreview",
+    "MapsUrlRequest",
     "RunQueuedResponse",
 ]
 
@@ -111,6 +113,20 @@ class GridDefinitionCreate(BaseModel):
     keyword: str = Field(min_length=1, max_length=200)
     center_lat: float | None = Field(default=None, ge=-90, le=90, alias="centerLat")
     center_lng: float | None = Field(default=None, ge=-180, le=180, alias="centerLng")
+    #: A pasted Google Maps link for the business. THE HIGHEST-PRECEDENCE CENTRE, above
+    #: explicit coordinates: the operator went and found the listing on Google, so the
+    #: link names one exact place and the server resolves its pin by ``place_id`` rather
+    #: than searching for a name. Records ``centerSource='maps_url'``.
+    #:
+    #: Explicit coordinates stay supported and unchanged - they are simply the manual
+    #: path now, and a paste beats a retype because a retype is where digits get lost.
+    maps_url: str | None = Field(default=None, alias="mapsUrl", max_length=2048)
+    #: Whether to copy the resolved listing's name / address / phone onto the client's
+    #: canonical business profile. OFF by default and never implied by pasting a link:
+    #: that record is what the citations module submits to directories, so overwriting
+    #: it is a decision about the client's NAP everywhere, not a side effect of setting
+    #: up a heat map. Ignored unless the lookup actually VERIFIED an identity.
+    sync_nap: bool = Field(default=False, alias="syncNap")
     #: An N x N square is the market's shape and the default; `rings` is kept only so
     #: a pre-0143 grid can still be recreated exactly as it was probed.
     shape: str = Field(default="square", pattern="^(square|rings)$")
@@ -145,6 +161,49 @@ class GridDefinitionUpdate(BaseModel):
     is_active: bool = Field(alias="isActive")
 
     model_config = {"populate_by_name": True, "extra": "ignore"}
+
+
+class MapsUrlRequest(BaseModel):
+    """POST body for the Maps-link preview: the pasted URL, and nothing else."""
+
+    maps_url: str = Field(min_length=1, max_length=2048, alias="mapsUrl")
+
+    model_config = {"populate_by_name": True}
+
+
+class MapsUrlPreview(BaseModel):
+    """What a pasted Google Maps link resolved to, BEFORE anything is created.
+
+    This is a confirmation screen's payload, and it exists because the alternative -
+    resolving silently inside the create call - hides the one moment a human can catch
+    a wrong paste. 0142 had to add evidence columns after the fact for exactly this
+    reason on the ``places`` path; here the evidence arrives first.
+
+    ``identityVerified`` is the field the UI must gate the NAP-sync offer on: False
+    means the coordinates are good and the business details are unknown, and offering
+    to write unknown details to the client's canonical record would be the worst
+    possible reading of a helpful default.
+    """
+
+    lat: float
+    lng: float
+    source: str
+    #: True unless the coordinate fell back to the URL's panned-camera viewport.
+    precise: bool
+    place_id: str = Field(default="", serialization_alias="placeId")
+    cid: str = ""
+    name: str = ""
+    address: str = ""
+    city: str = ""
+    region: str = ""
+    postal_code: str = Field(default="", serialization_alias="postalCode")
+    phone: str = ""
+    website: str = ""
+    listing_url: str = Field(default="", serialization_alias="listingUrl")
+    identity_verified: bool = Field(serialization_alias="identityVerified")
+    reason: str = ""
+
+    model_config = {"populate_by_name": True}
 
 
 class GridDefinitionResponse(BaseModel):

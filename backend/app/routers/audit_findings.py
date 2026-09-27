@@ -7,6 +7,7 @@ One audit is readable at three altitudes, and each level links to the next:
     GET /audits/{id}/findings/{fid}/instances    NANO   every occurrence
     GET /audits/{id}/pages                       the page-side pivot
     GET /audits/{id}/workbook                    the whole thing as one download
+    GET /audits/{id}/compare                     DELTA  what changed since last time
 
 Guarded exactly like the existing audit reads (``view_reports`` - all six staff
 roles, no client). Reads go through the RLS seam; the altitude tables are
@@ -16,6 +17,7 @@ staff-select and nothing writes them through a user JWT.
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime
 from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -25,6 +27,7 @@ from app.core.auth import CurrentUser, require_perm
 from app.db.audit_findings_repo import AuditFindingsRepoDep
 from app.db.audits_repo import AuditsRepoDep
 from app.routers.audits import ArtifactStoreDep
+from app.services.audit_compare import compare as compare_runs
 from app.services.audit_report import REPORT_NAME, REPORT_PDF_NAME
 from app.services.audit_roadmap import (
     PHASE_BACKLOG,
@@ -35,6 +38,18 @@ from app.services.audit_roadmap import (
 from app.services.audit_workbook import BUNDLE_NAME, WORKBOOK_NAME
 
 router = APIRouter(tags=["audits"])
+
+#: How many causes per run the comparison reads. The repo caps a page at 500 and a real
+#: 197-page audit collapsed to 81 causes (0094's own measurement), so this covers the
+#: realistic worst case in one read. A run with more than this compares its most severe
+#: 500 - and the comparison says so rather than silently comparing a subset, because a
+#: "fixed" list built from a truncated baseline would invent fixes.
+_COMPARE_LIMIT = 500
+
+
+def _iso_or_blank(value: Any) -> str:
+    """An ISO timestamp, or "" - never the string "None" in a client-visible payload."""
+    return value.isoformat() if isinstance(value, datetime) else ""
 
 ViewReports = Annotated[CurrentUser, Depends(require_perm("view_reports"))]
 
@@ -218,3 +233,98 @@ async def download_audit_pack(
     if not path.is_file():
         raise _NOT_FOUND
     return FileResponse(path, media_type=media, filename=f"audit-{audit_id}-{filename}")
+
+
+# --------------------------------------------------------------------------- #
+# DELTA. The question a retainer is renewed on.
+# --------------------------------------------------------------------------- #
+@router.get("/audits/{audit_id}/compare")
+async def audit_compare(
+    audit_id: str,
+    repo: AuditsRepoDep,
+    altitudes: AuditFindingsRepoDep,
+    _user: ViewReports,
+    to: str | None = None,
+) -> dict[str, Any]:
+    """What changed between this audit and an earlier one of the same site.
+
+    ``to`` names the EARLIER audit; omitted, it defaults to the previous completed audit of
+    the same site. A site with only one audit is not an error - it returns
+    ``available: false`` with the reason, because "there is nothing to compare yet" is a
+    legitimate state that a panel should render calmly rather than as a failure.
+
+    Everything here is a read of rows the audits already produced
+    (``app.services.audit_compare`` is pure), so this costs nothing, spends nothing, and
+    returns the same answer every time it is asked about the same two runs.
+
+    THE ONE CLAIM IT IS CAREFUL ABOUT. A finding that vanished because the later run did
+    not run its dimension is reported as ``unchecked``, never as ``fixed`` - otherwise a
+    shallower depth or a lapsed provider key would be presented to a client as work
+    completed. That distinction is the reason this reads both runs' coverage and not just
+    their findings.
+    """
+    current = await _require_audit(repo, audit_id)
+    if to:
+        baseline = await asyncio.to_thread(repo.get_audit, to)
+        if baseline is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Baseline audit not found"
+            )
+        if str(baseline.get("url") or "") != str(current.get("url") or ""):
+            # Comparing two different sites produces a delta that is arithmetically fine
+            # and completely meaningless, so it is refused rather than rendered.
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Those two audits are of different sites, so there is nothing to compare.",
+            )
+    else:
+        baseline = await asyncio.to_thread(repo.previous_audit, audit_id)
+
+    runs = await asyncio.to_thread(repo.audits_of_same_site, audit_id)
+    history = [
+        {
+            "id": str(r["id"]),
+            "when": _iso_or_blank(r.get("created_at")),
+            "depth": str(r.get("depth") or ""),
+            "score": int(r["score"]) if r.get("score") is not None else None,
+        }
+        for r in runs
+    ]
+
+    if baseline is None:
+        return {
+            "available": False,
+            "reason": (
+                "This is the first completed audit of this site, so there is nothing to "
+                "compare it against yet. The next run will show what changed."
+            ),
+            "runs": history,
+        }
+
+    before_id = str(baseline["id"])
+    before_findings = await asyncio.to_thread(
+        altitudes.findings, before_id, limit=_COMPARE_LIMIT
+    )
+    after_findings = await asyncio.to_thread(
+        altitudes.findings, audit_id, limit=_COMPARE_LIMIT
+    )
+    before_rollups = await asyncio.to_thread(altitudes.rollups, before_id)
+    after_rollups = await asyncio.to_thread(altitudes.rollups, audit_id)
+
+    result = compare_runs(
+        before_findings=before_findings,
+        after_findings=after_findings,
+        before_rollups=before_rollups,
+        after_rollups=after_rollups,
+    )
+    baseline_when = baseline.get("created_at")
+    return {
+        "available": True,
+        "baseline": {
+            "id": before_id,
+            "when": _iso_or_blank(baseline_when),
+            "depth": str(baseline.get("depth") or ""),
+        },
+        "runs": history,
+        **result.as_dict(),
+    }

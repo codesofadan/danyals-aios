@@ -494,3 +494,23 @@
 		transition: none;
 	}
 }
+
+/* --------------------------------------------------------------------------
+ * A SELF-CONTAINED DESIGN PAGE  (.aios-article--designed)
+ * --------------------------------------------------------------------------
+ * The body is a complete AIOS design document (`.aios-doc`) that manages its own
+ * sections, gutters and full-bleed bands, styled entirely by the design CSS
+ * enqueued in <head>. This wrapper exists only to BREAK IT OUT of the theme's
+ * content column - it must add no measure, no padding and no typography of its
+ * own, or the page is laid out twice and the two disagree.
+ *
+ * `.aios-article--full > *` above gives every direct child a page-width cap and
+ * side gutters, which is right for the article furniture and wrong here: the
+ * design's own `.wrap` already centres and pads, so the cap would strangle the
+ * full-bleed bands and the gutters would double.
+ * -------------------------------------------------------------------------- */
+.aios-article--designed > * {
+	max-width: none;
+	margin-inline: 0;
+	padding-inline: 0;
+}

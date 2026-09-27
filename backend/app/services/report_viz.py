@@ -72,13 +72,15 @@ def build_report_viz(client_id: str, granted_keys: list[str]) -> list[PortalRepo
     (honest zeros), and every other granted key renders a placeholder sample viz."""
     granted = set(granted_keys)
     audit_series: list[tuple[str, float]] = []
+    #: Runs left out of the trend because they measured a different check set (B5).
+    audit_excluded = 0
     content_series: list[tuple[str, float]] = []
     milestones: dict[str, Any] | None = None
 
     try:
         with privileged_connection() as cur:
             if "audit_scores" in granted:
-                audit_series = _fetch_audit_scores(cur, client_id)
+                audit_series, audit_excluded = _fetch_audit_scores(cur, client_id)
             if "content_status" in granted:
                 content_series = _fetch_content_counts(cur, client_id)
             if "milestones" in granted:
@@ -93,7 +95,7 @@ def build_report_viz(client_id: str, granted_keys: list[str]) -> list[PortalRepo
         if key not in granted:
             continue
         if key == "audit_scores":
-            out.append(_audit_scores_report(audit_series))
+            out.append(_audit_scores_report(audit_series, audit_excluded))
         elif key == "content_status":
             out.append(_content_status_report(content_series))
         elif key == "milestones":
@@ -125,17 +127,76 @@ def _bucketize(window: list[tuple[int, int]], data: dict[tuple[int, int], float]
     ]
 
 
-def _fetch_audit_scores(cur: Cursor[DictRow], client_id: str) -> list[tuple[str, float]]:
+def _fetch_audit_scores(
+    cur: Cursor[DictRow], client_id: str
+) -> tuple[list[tuple[str, float]], int]:
+    """The client's site-score trend, and how many runs were LEFT OUT of it.
+
+    ONE MEASUREMENT BASIS ONLY. Two audit scores are comparable only when the runs measured
+    the same check set - that is what ``audit_rollups.basis_hash`` records (0094), and a
+    free run against a deep run is two different measurements. Averaging them into one line
+    produces a trend that describes OUR configuration changing rather than the client's site
+    changing, on the portal page most likely to be screenshotted into a report.
+
+    So the series is built from the runs sharing the client's most recent basis, and the
+    count of excluded runs is returned with it so the caption can say so rather than quietly
+    showing a shorter line. A client with a single basis - the normal case - loses nothing.
+
+    Falls back to every scored run when no rollup carries a basis (audits that predate
+    0094): a trend built on the old rule is better than an empty panel, and it is the
+    behaviour that shipped for those runs anyway.
+    """
     cur.execute(
-        "select date_trunc('month', coalesce(finished_at, created_at)) as mon, "
-        "avg(score)::float as val "
-        "from public.audits "
-        "where client_id = %s and score is not null "
-        "group by mon",
+        """select r.basis_hash
+           from public.audit_rollups r
+           join public.audits a on a.id = r.audit_id
+           where r.client_id = %s and r.level = 'site' and r.basis_hash <> ''
+             and a.score is not null
+           order by r.generated_at desc
+           limit 1""",
         (client_id,),
     )
+    row = cur.fetchone()
+    basis = str((row or {}).get("basis_hash") or "")
+
+    if not basis:
+        cur.execute(
+            "select date_trunc('month', coalesce(finished_at, created_at)) as mon, "
+            "avg(score)::float as val "
+            "from public.audits "
+            "where client_id = %s and score is not null "
+            "group by mon",
+            (client_id,),
+        )
+        data = {
+            (r["mon"].year, r["mon"].month): round(float(r["val"]), 1) for r in cur.fetchall()
+        }
+        return _bucketize(_month_window(), data), 0
+
+    cur.execute(
+        """select date_trunc('month', coalesce(a.finished_at, a.created_at)) as mon,
+                  avg(a.score)::float as val
+           from public.audits a
+           join public.audit_rollups r
+             on r.audit_id = a.id and r.level = 'site' and r.basis_hash = %s
+           where a.client_id = %s and a.score is not null
+           group by mon""",
+        (basis, client_id),
+    )
     data = {(r["mon"].year, r["mon"].month): round(float(r["val"]), 1) for r in cur.fetchall()}
-    return _bucketize(_month_window(), data)
+
+    cur.execute(
+        """select count(*)::int as n
+           from public.audits a
+           where a.client_id = %s and a.score is not null
+             and not exists (
+               select 1 from public.audit_rollups r
+               where r.audit_id = a.id and r.level = 'site' and r.basis_hash = %s
+             )""",
+        (client_id, basis),
+    )
+    excluded = int((cur.fetchone() or {}).get("n") or 0)
+    return _bucketize(_month_window(), data), excluded
 
 
 def _fetch_content_counts(cur: Cursor[DictRow], client_id: str) -> list[tuple[str, float]]:
@@ -170,7 +231,9 @@ def _fetch_milestones(cur: Cursor[DictRow], client_id: str) -> dict[str, Any] | 
 # --------------------------------------------------------------------------- #
 # Report constructors
 # --------------------------------------------------------------------------- #
-def _audit_scores_report(series: list[tuple[str, float]]) -> PortalReportResponse:
+def _audit_scores_report(
+    series: list[tuple[str, float]], excluded: int = 0
+) -> PortalReportResponse:
     labels = [label for label, _ in series]
     points = [value for _, value in series]
     has_data = any(points)
@@ -184,9 +247,19 @@ def _audit_scores_report(series: list[tuple[str, float]]) -> PortalReportRespons
     latest = next((p for p in reversed(points) if p), points[-1])
     first = next((p for p in points if p), 0.0)
     delta = round(latest - first, 1)
+    # The caption SAYS when runs were left out, rather than quietly showing a shorter
+    # line (B5). A client comparing this panel against the number of audits they know they
+    # have had deserves the reason for the difference, and "we only trend runs that measured
+    # the same things" is a better answer than an unexplained gap.
+    caption = "Overall site-health score, trended monthly"
+    if excluded:
+        caption += (
+            f" — {excluded} earlier run{'' if excluded == 1 else 's'} measured a different "
+            "set of checks and cannot be compared on one line"
+        )
     viz = ReportVizResponse(
         kind="area", headline=str(round(latest)), unit="/100",
-        caption="Overall site-health score, trended monthly",
+        caption=caption,
         delta=f"{'+' if delta >= 0 else ''}{delta:g} pts", up=delta >= 0,
         labels=labels, points=points,
     )

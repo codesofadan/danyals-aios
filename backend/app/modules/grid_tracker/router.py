@@ -29,6 +29,8 @@ from app.core.auth import CurrentUser, require_feature, require_perm, require_ro
 from app.core.deps import SettingsDep
 from app.core.pagination import PageDep
 from app.core.ratelimit import rate_limit
+from app.logging_setup import get_logger
+from app.modules.grid_tracker.maps_center import MapsCenter, MapsUrlError, resolve_maps_url
 from app.modules.grid_tracker.provider import grid_provider_is_live, resolve_center
 from app.modules.grid_tracker.repo import GridRepoDep
 from app.modules.grid_tracker.schemas import (
@@ -38,10 +40,13 @@ from app.modules.grid_tracker.schemas import (
     GridPointResponse,
     GridRunDetail,
     GridRunResponse,
+    MapsUrlPreview,
+    MapsUrlRequest,
     RunQueuedResponse,
 )
 from app.services.activity import record_activity
 
+logger = get_logger("grid_tracker.router")
 router = APIRouter(tags=["grid-tracker"])
 
 # The grid rides the local_seo feature grant - see the module docstring.
@@ -182,6 +187,53 @@ async def get_definition(
     return GridDefinitionResponse.from_row(row)
 
 
+def _preview_from_center(center: MapsCenter) -> MapsUrlPreview:
+    """Project the resolver's result onto the wire shape. One mapping, one place."""
+    return MapsUrlPreview(
+        lat=center.lat,
+        lng=center.lng,
+        source=center.source,
+        precise=center.is_precise,
+        place_id=center.place_id,
+        cid=center.cid,
+        name=center.name,
+        address=center.address,
+        city=center.city,
+        region=center.region,
+        postal_code=center.postal_code,
+        phone=center.phone,
+        website=center.website,
+        listing_url=center.listing_url,
+        identity_verified=center.identity_verified,
+        reason=center.reason,
+    )
+
+
+@router.post("/grid/maps-url/preview", response_model=MapsUrlPreview)
+async def preview_maps_url(
+    body: MapsUrlRequest,
+    settings: SettingsDep,
+    _user: ViewReports,
+    _feature: Feature,
+) -> MapsUrlPreview:
+    """Resolve a pasted Google Maps link and SHOW what it found. Creates nothing.
+
+    A read, not a write, and deliberately a separate call from ``create_definition``:
+    the whole value of pasting a link is that a human can confirm the business before a
+    grid is built on it. Resolving silently inside the create would put the confirmation
+    after the commit, which is where 0142's evidence columns had to be retro-fitted.
+
+    A 422 means the string cannot yield a centre at all, and its ``detail`` says what to
+    paste instead. A resolvable link with an unverified identity is a 200 - the
+    coordinates are real and the caller is told the business details are not.
+    """
+    try:
+        center = await asyncio.to_thread(resolve_maps_url, settings, body.maps_url)
+    except MapsUrlError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from exc
+    return _preview_from_center(center)
+
+
 @router.post(
     "/grid/definitions",
     response_model=GridDefinitionResponse,
@@ -216,6 +268,24 @@ async def create_definition(
     center_source = "operator"
     matched_name = matched_address = ""
     lat, lng = body.center_lat, body.center_lng
+    resolved_maps: MapsCenter | None = None
+
+    # A PASTED LINK OUTRANKS TYPED COORDINATES, and that order is the point of the
+    # feature. Both are "the operator said so", but one was copied from the listing
+    # itself and the other was read off a screen and retyped - and a retyped coordinate
+    # is where a digit goes missing without anything downstream being able to tell.
+    if body.maps_url:
+        try:
+            resolved_maps = await asyncio.to_thread(resolve_maps_url, settings, body.maps_url)
+        except MapsUrlError as exc:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from exc
+        lat, lng = resolved_maps.lat, resolved_maps.lng
+        center_source = "maps_url"
+        # The 0142 evidence columns, filled from the listing the operator actually
+        # pointed at rather than from a name match. Empty when the identity could not
+        # be verified - an unverified centre must not display as a confirmed business.
+        matched_name, matched_address = resolved_maps.name, resolved_maps.address
+
     if lat is None or lng is None:
         resolved = await asyncio.to_thread(
             resolve_center,
@@ -262,7 +332,72 @@ async def create_definition(
         ),
         target=client_name, entity_type="client", entity_id=client_id,
     )
+
+    if body.sync_nap and resolved_maps is not None:
+        await _sync_nap_from_maps(user, client_id, client_name, resolved_maps)
+
     return GridDefinitionResponse.from_row({**row, **_profile_labels(profile)})
+
+
+async def _sync_nap_from_maps(
+    user: CurrentUser, client_id: str, client_name: str, center: MapsCenter
+) -> None:
+    """Copy the resolved Google listing onto the client's canonical NAP.
+
+    WHY THIS IS OPT-IN AND GUARDED TWICE. ``client_business_profiles`` is the record the
+    citations module derives its directory submissions from - the whole point of that
+    table's docstring. A wrong value here does not stay here; it is submitted to
+    directories under the client's name, and unpicking a bad NAP across a live citation
+    campaign is far more work than pasting the right link in the first place. So it
+    happens only when the operator explicitly asked (``syncNap``) AND the lookup
+    actually verified an identity.
+
+    ONLY NON-EMPTY FIELDS ARE WRITTEN. A Places response legitimately omits a phone
+    number or a postcode, and letting those omissions through as empty strings would
+    have this feature ERASE good data the operator entered by hand - a sync that
+    quietly deletes is not a sync. Writing only what was measured means the worst case
+    is an unchanged field.
+
+    Never fatal: the grid is created either way. A NAP sync that fails must not roll
+    back a definition that was made correctly, so the failure is logged and reported
+    through the activity trail rather than raised at the operator.
+    """
+    if not center.identity_verified:
+        return
+
+    candidates = {
+        "business_name": center.name,
+        "address_line1": center.address,
+        "city": center.city,
+        "region": center.region,
+        "postal_code": center.postal_code,
+        "phone": center.phone,
+        "website_url": center.website,
+    }
+    fields = {key: value.strip() for key, value in candidates.items() if value.strip()}
+    if not fields:
+        return
+
+    from app.db.clients_repo import ClientsRepo
+
+    try:
+        await asyncio.to_thread(
+            ClientsRepo(user.id).upsert_business_profile,
+            client_id=client_id,
+            client_name=client_name,
+            fields=fields,
+        )
+    except Exception:
+        logger.warning("grid_maps_nap_sync_failed", client_id=client_id)
+        return
+
+    await record_activity(
+        user, kind="client",
+        action=(
+            f"updated the NAP from a Google Maps listing ({', '.join(sorted(fields))})"
+        ),
+        target=client_name, entity_type="client", entity_id=client_id,
+    )
 
 
 def _profile_labels(profile: dict[str, Any]) -> dict[str, Any]:

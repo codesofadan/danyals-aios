@@ -34,16 +34,20 @@ import {
   scoreTone,
 } from "@/lib/auditAltitude";
 import PillarScorecard from "@/components/audit/PillarScorecard";
+import SinceLastAudit from "@/components/audit/SinceLastAudit";
 import SubpointTable from "@/components/audit/SubpointTable";
 import FindingList from "@/components/audit/FindingList";
 import RoadmapBoard from "@/components/audit/RoadmapBoard";
 import AuditPagesTable from "@/components/audit/AuditPagesTable";
 import ReportViewer from "@/components/report/ReportViewer";
 
-type Tab = "overview" | "strategy" | "issues" | "pages" | "downloads";
+type Tab = "overview" | "changed" | "strategy" | "issues" | "pages" | "downloads";
 
 const TABS: { key: Tab; label: string; icon: string }[] = [
   { key: "overview", label: "Overview", icon: "insights" },
+  // The question a returning client opens with, and the one the module could not answer
+  // until the comparison existed. Second, right after the current state.
+  { key: "changed", label: "Since last audit", icon: "compare_arrows" },
   { key: "strategy", label: "Strategy", icon: "flag" },
   { key: "issues", label: "Issues", icon: "bug_report" },
   { key: "pages", label: "Pages", icon: "description" },
@@ -294,6 +298,28 @@ export default function AuditDetail({ auditId }: { auditId: string }) {
         ) : null}
       </header>
 
+      {/* DID WE ACTUALLY GET TO SEE THE SITE? Above the scores, because a blocked or
+          partial crawl changes what every number below it means - and a run that was
+          refused looks identical to a clean audit of a small site from here: green,
+          complete, a short page list, honest nulls. Nothing renders for a clean run. */}
+      {row?.crawlNote ? (
+        <div
+          className="card"
+          style={{
+            padding: "14px 18px", marginBottom: 12,
+            borderLeft: `4px solid ${row.crawlVerdict === "blocked" ? "var(--crit)" : "var(--warn)"}`,
+          }}
+          role="note"
+        >
+          <b>
+            {row.crawlVerdict === "blocked"
+              ? "We could not fully reach this site"
+              : "This run saw part of the site"}
+          </b>
+          <div className="cs" style={{ marginTop: 4 }}>{row.crawlNote}</div>
+        </div>
+      ) : null}
+
       {/* Persistent across every tab: the frame the rest is read inside. */}
       <div className="card alt-stands">
         <div className="card-h">
@@ -344,6 +370,8 @@ export default function AuditDetail({ auditId }: { auditId: string }) {
           <SubpointTable rollups={rollups.data ?? []} />
         </div>
       ) : null}
+
+      {tab === "changed" ? <SinceLastAudit auditId={auditId} /> : null}
 
       {tab === "strategy" ? (
         <div className="card">

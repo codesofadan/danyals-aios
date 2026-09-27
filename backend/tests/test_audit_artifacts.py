@@ -109,8 +109,10 @@ def test_worker_copies_artifacts_and_sets_flags(tmp_path: Path) -> None:
     def _runner(
         cfg: AuditEngineConfig, *, url: str, tier: str, comprehensive: bool = False,
         depth: str | None = None, max_pages: int | None = None,
-        # Mirrors the _Runner protocol (client name -> Google Places).
+        # Mirrors the _Runner protocol (the client's CANONICAL business name + city
+        # -> Google Places, resolved from client_business_profiles).
         business_name: str | None = None,
+        city: str | None = None,
         is_local_business: bool = False,
     ) -> AuditRunResult:
         return AuditRunResult(

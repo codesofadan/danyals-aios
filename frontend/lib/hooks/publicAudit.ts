@@ -1,21 +1,21 @@
 "use client";
 
 // ============================================================
-// AIOS · public free-audit hooks (the unauthenticated funnel)
-// Backs /free-audit off the REAL FastAPI public endpoints
-// (app/routers/public.py) instead of the old client-side PRNG report.
-// These are the platform's ONLY unauthenticated calls — `api.*` sends
-// no bearer token (none is needed; the endpoint is public and the
-// opaque `report_token` IS the capability that grants read of one report).
-//   • useCreatePublicAudit — POST /public/audits {email,url,types?} →
-//     {report_token,status}. 409 = "one free audit per email" already used;
-//     400 = a paid audit type or a non-public URL. Both carry a human
-//     reason on ApiError.message.
-//   • usePublicReport(token) — GET /public/audits/{token}; polls every
-//     2.5s WHILE queued/running, then stops (mirrors hooks/audits.ts).
+// AIOS · public report hooks (the shared-link surface)
+// Backs /leads/<slug> off the public FastAPI endpoints in
+// app/routers/public.py. These are the platform's ONLY unauthenticated
+// calls — `api.*` sends no bearer token, and the slug IS the capability
+// that grants read of one published report.
+//
+// `useCreatePublicAudit` and `usePublicReport(token)` used to live here too.
+// They drove the self-serve funnel retired on 2026-09-17, whose POST
+// /public/audits endpoint was removed with it — so the mutation had no server
+// to call. They were kept only so the parked funnel components would still
+// type-check; those were deleted on 2026-09-19, and these went with them.
+// An audit is now run by an operator and SHARED by slug.
 // ============================================================
 
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { api, FILE_BASE } from "@/lib/api";
 import type { AuditTypeKey } from "@/lib/audit";
 
@@ -50,8 +50,6 @@ export type CreatePublicAuditInput = {
   types?: AuditTypeKey[];
 };
 
-const publicAuditKey = (token: string) => ["public-audit", token] as const;
-
 // The PDF href uses FILE_BASE (lib/api.ts): the multi-MB report must stream
 // straight from the API origin, not crawl through the Next rewrite proxy. A
 // plain browser GET, not an api.* fetch — the token in the path is the guard.
@@ -77,44 +75,12 @@ export async function fetchPublicReportHtml(token: string): Promise<string> {
   return res.text();
 }
 
-const isPending = (r: PublicReport | undefined) => r?.status === "queued" || r?.status === "running";
-
 /**
  * Enqueue ONE free audit for an email. `retry: 0` (inherited from the client's
  * mutation default) so a transient failure never silently creates a second lead
  * row. 409/400 surface as an ApiError whose `.status` + `.message` the caller
  * renders as a first-class state.
  */
-// RETIRED SURFACE, kept only so the parked funnel components still compile.
-//
-// `useCreatePublicAudit` and `usePublicReport` target POST /public/audits and its
-// token-polled read. The CREATE endpoint was removed on 2026-09-17 with the
-// self-serve funnel (see frontend/parked.registry.ts), so this mutation now has no
-// server to call - it is here because FreeAuditFlow/FreeAuditReport are parked
-// rather than deleted, and parked code has to keep type-checking.
-//
-// Do not wire either of these into a live surface. The report route the platform
-// still serves is the slug-based one further down (`usePublicPage`), which backs
-// /leads/<slug> - the page an operator shares.
-export function useCreatePublicAudit() {
-  return useMutation<PublicAuditCreated, unknown, CreatePublicAuditInput>({
-    mutationFn: (input) => api.post<PublicAuditCreated>("/public/audits", input),
-  });
-}
-
-/**
- * Poll the curated report for a token. Disabled until a token exists; polls
- * every 2.5s WHILE the job is queued/running, then stops on done/failed.
- */
-export function usePublicReport(token: string | null) {
-  return useQuery({
-    queryKey: token ? publicAuditKey(token) : (["public-audit", "idle"] as const),
-    queryFn: () => api.get<PublicReport>(`/public/audits/${token}`),
-    enabled: !!token,
-    refetchInterval: (query) => (isPending(query.state.data as PublicReport | undefined) ? 2500 : false),
-  });
-}
-
 // --------------------------------------------------------------------------
 // Readable public pages: /leads/<slug>
 // --------------------------------------------------------------------------
@@ -123,6 +89,9 @@ export function usePublicReport(token: string | null) {
 // only public surface a paid audit has. FILE_BASE for the same reason as above:
 // the report streams straight from the API origin rather than through the Next
 // rewrite proxy.
+
+/** One headline problem, as the public page shows it (no check ids, no evidence). */
+export type PublicFinding = { title: string; severity: string; pages: number };
 
 /** The curated payload behind a readable slug (free or paid, published only). */
 export type PublicPage = {
@@ -137,6 +106,12 @@ export type PublicPage = {
   has_report: boolean;
   when: string | null;
   fiverr_url: string;
+  /** The worst handful, most severe first. Empty when the run stored no findings. */
+  top_findings?: PublicFinding[];
+  /** What this run did NOT measure. Read by the page as "not checked", never "clean". */
+  not_checked?: string[];
+  /** Set when the crawl was thin or refused, so the score is read with that in mind. */
+  crawl_note?: string;
 };
 
 export const publicPageKey = (slug: string) => ["public-page", slug] as const;

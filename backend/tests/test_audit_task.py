@@ -18,7 +18,11 @@ pytestmark = pytest.mark.unit
 
 class FakeStore:
     def __init__(
-        self, row: dict[str, Any] | None, *, decision: GateDecision | None = None
+        self,
+        row: dict[str, Any] | None,
+        *,
+        decision: GateDecision | None = None,
+        profile: dict[str, Any] | None = None,
     ) -> None:
         self.row = row
         self.updates: list[dict[str, Any]] = []
@@ -27,6 +31,10 @@ class FakeStore:
         # prove the worker refuses to spend on it.
         self.decision = decision
         self.evaluated: list[float] = []
+        # The client's canonical NAP row, or None for a client who has none. The
+        # worker identifies the GBP by this rather than by the CRM display name.
+        self.profile = profile
+        self.profile_lookups: list[str] = []
 
     def load(self, audit_id: str) -> dict[str, Any] | None:
         return self.row
@@ -42,6 +50,10 @@ class FakeStore:
 
     def record_cost(self, row: dict[str, Any], cost: float) -> None:
         self.costs.append(cost)
+
+    def business_profile(self, client_id: str) -> dict[str, Any] | None:
+        self.profile_lookups.append(client_id)
+        return self.profile
 
 
 def _settings() -> Settings:
@@ -77,9 +89,10 @@ def _ok_runner(score: int) -> Any:
         comprehensive: bool = False,
         depth: str | None = None,
         max_pages: int | None = None,
-        # Mirrors the _Runner protocol: the client's own name, passed so Google
-        # Places identifies the business from what we KNOW.
+        # Mirrors the _Runner protocol: the client's CANONICAL business name + city,
+        # passed so Google Places identifies the business from what we KNOW.
         business_name: str | None = None,
+        city: str | None = None,
         is_local_business: bool = False,
     ) -> AuditRunResult:
         return AuditRunResult(
@@ -123,9 +136,10 @@ def test_engine_failure_marks_failed_never_running() -> None:
         comprehensive: bool = False,
         depth: str | None = None,
         max_pages: int | None = None,
-        # Mirrors the _Runner protocol: the client's own name, passed so Google
-        # Places identifies the business from what we KNOW.
+        # Mirrors the _Runner protocol: the client's CANONICAL business name + city,
+        # passed so Google Places identifies the business from what we KNOW.
         business_name: str | None = None,
+        city: str | None = None,
         is_local_business: bool = False,
     ) -> AuditRunResult:
         return AuditRunResult(ok=False, run_uuid="u-9", runtime_seconds=5, error="engine timed out after 1500s")
@@ -191,9 +205,10 @@ def _tracking_runner(ran: list[bool], score: int = 90) -> Any:
         comprehensive: bool = False,
         depth: str | None = None,
         max_pages: int | None = None,
-        # Mirrors the _Runner protocol: the client's own name, passed so Google
-        # Places identifies the business from what we KNOW.
+        # Mirrors the _Runner protocol: the client's CANONICAL business name + city,
+        # passed so Google Places identifies the business from what we KNOW.
         business_name: str | None = None,
+        city: str | None = None,
         is_local_business: bool = False,
     ) -> AuditRunResult:
         ran.append(True)  # records that the (paid) engine actually executed
@@ -266,9 +281,10 @@ def _pdf_runner(score: int) -> Any:
         cfg: AuditEngineConfig, *, url: str, tier: str,
         comprehensive: bool = False, depth: str | None = None,
         max_pages: int | None = None,
-        # Mirrors the _Runner protocol: the client's own name, passed so Google
-        # Places identifies the business from what we KNOW.
+        # Mirrors the _Runner protocol: the client's CANONICAL business name + city,
+        # passed so Google Places identifies the business from what we KNOW.
         business_name: str | None = None,
+        city: str | None = None,
         is_local_business: bool = False,
     ) -> AuditRunResult:
         return AuditRunResult(
@@ -337,7 +353,7 @@ def test_task_is_registered() -> None:
 
 def _runner_reporting(mode: str) -> Any:
     def _run(cfg, *, url, tier, comprehensive=False, depth=None, max_pages=None,
-             business_name=None, is_local_business=False):  # mirrors _Runner
+             business_name=None, city=None, is_local_business=False):  # mirrors _Runner
         return AuditRunResult(
             ok=True, run_uuid="u-1", artifact_dir="/art/u-1", score=70,
             scores={"overall": 70}, runtime_seconds=10, exit_code=0,

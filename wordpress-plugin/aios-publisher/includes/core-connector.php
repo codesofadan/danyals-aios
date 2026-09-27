@@ -116,6 +116,22 @@ function aios_publisher_register_routes() {
 			'permission_callback' => 'aios_publisher_check_key',
 		)
 	);
+	// Push ONE image into this site's media library by value, returning its local URL.
+	//
+	// The complement to every sideload path in this plugin, and the one that works when
+	// the platform's image host is not reachable from this server - a laptop, a private
+	// network, anything behind a VPN. Sideloading fails silently in those cases (it is
+	// best-effort by design), so the page publishes with pictures no visitor can load.
+	// Same shared-key permission as the other two routes.
+	register_rest_route(
+		AIOS_PUBLISHER_REST_NAMESPACE,
+		'/media',
+		array(
+			'methods'             => 'POST',
+			'callback'            => 'aios_publisher_rest_media',
+			'permission_callback' => 'aios_publisher_check_key',
+		)
+	);
 }
 
 /**
@@ -186,6 +202,151 @@ function aios_publisher_rest_ping( $request ) {
 }
 
 /**
+ * The media types this route will store, and the extension each is written with.
+ *
+ * AN ALLOW-LIST, NOT A BLOCK-LIST, and the extension comes from THIS table rather than
+ * from the caller's filename. A caller-chosen extension is how an upload endpoint becomes
+ * a way to write executable files into a public directory: `logo.php` with an image
+ * content-type is still `logo.php` on disk. The name the caller sends is used only to make
+ * the file recognisable in the media library, and its extension is discarded.
+ *
+ * @return array<string,string> content-type => extension.
+ */
+function aios_publisher_media_types() {
+	return array(
+		'image/png'  => 'png',
+		'image/jpeg' => 'jpg',
+		'image/webp' => 'webp',
+		'image/gif'  => 'gif',
+		'image/avif' => 'avif',
+	);
+}
+
+/**
+ * POST /media - store ONE image sent by value and return its URL on this site.
+ *
+ * WHY BY VALUE. Every other image path in this plugin sideloads: the platform sends a URL
+ * and this server fetches it. That silently requires the platform's image host to be
+ * reachable from here, and when it is not - a laptop, a private network, anything behind a
+ * VPN - `media_sideload_image()` returns an error, the caller treats it as best-effort,
+ * and the page publishes with an <img> pointing at an address no visitor can load. The
+ * picture is simply missing, and nothing in the publish result said so.
+ *
+ * Body: `filename` (for the library listing only), `content_type` (must be in the
+ * allow-list above), `data_base64` (the bytes). Returns `{ok, id, url}`.
+ *
+ * @param WP_REST_Request $request The REST request.
+ * @return WP_REST_Response
+ */
+function aios_publisher_rest_media( $request ) {
+	$types        = aios_publisher_media_types();
+	$content_type = strtolower( trim( (string) $request->get_param( 'content_type' ) ) );
+	if ( ! isset( $types[ $content_type ] ) ) {
+		return new WP_REST_Response(
+			array(
+				'ok'      => false,
+				'error'   => 'unsupported content_type',
+				'allowed' => array_keys( $types ),
+			),
+			400
+		);
+	}
+
+	$encoded = (string) $request->get_param( 'data_base64' );
+	if ( '' === $encoded ) {
+		return new WP_REST_Response( array( 'ok' => false, 'error' => 'data_base64 is required' ), 400 );
+	}
+	// Strict decode: a body that is not valid base64 is a malformed request, not
+	// something to salvage into whatever bytes PHP can make of it.
+	$bytes = base64_decode( $encoded, true );
+	if ( false === $bytes || '' === $bytes ) {
+		return new WP_REST_Response( array( 'ok' => false, 'error' => 'data_base64 is not valid base64' ), 400 );
+	}
+	if ( strlen( $bytes ) > AIOS_PUBLISHER_MAX_MEDIA_BYTES ) {
+		return new WP_REST_Response(
+			array(
+				'ok'        => false,
+				'error'     => 'image too large',
+				'max_bytes' => AIOS_PUBLISHER_MAX_MEDIA_BYTES,
+			),
+			413
+		);
+	}
+
+	// THE BYTES DECIDE THE TYPE, not the caller. A declared content-type is a claim; a
+	// PHP file renamed to .png and declared as image/png would pass every check above.
+	// getimagesizefromstring() actually parses the image header, so a non-image is
+	// rejected here whatever it was labelled.
+	$probe = function_exists( 'getimagesizefromstring' ) ? @getimagesizefromstring( $bytes ) : false;
+	if ( false === $probe || empty( $probe[0] ) || empty( $probe[1] ) ) {
+		// AVIF is not parsed by older GD builds; accept it on the declared type alone
+		// rather than refusing a format this site may well support.
+		if ( 'image/avif' !== $content_type ) {
+			return new WP_REST_Response( array( 'ok' => false, 'error' => 'not a readable image' ), 400 );
+		}
+	}
+
+	// The filename is sanitised and then given OUR extension for the declared type -
+	// see aios_publisher_media_types() for why the caller's extension is discarded.
+	$base = sanitize_file_name( (string) $request->get_param( 'filename' ) );
+	$base = preg_replace( '/\.[A-Za-z0-9]{1,8}$/', '', (string) $base );
+	if ( '' === (string) $base ) {
+		$base = 'aios-image';
+	}
+	$filename = substr( (string) $base, 0, 96 ) . '.' . $types[ $content_type ];
+
+	require_once ABSPATH . 'wp-admin/includes/file.php';
+	require_once ABSPATH . 'wp-admin/includes/media.php';
+	require_once ABSPATH . 'wp-admin/includes/image.php';
+
+	// wp_upload_bits writes into the uploads directory with WordPress's own naming and
+	// collision handling - never a path this function builds itself.
+	$written = wp_upload_bits( $filename, null, $bytes );
+	if ( ! empty( $written['error'] ) ) {
+		return new WP_REST_Response(
+			array( 'ok' => false, 'error' => sanitize_text_field( (string) $written['error'] ) ),
+			500
+		);
+	}
+
+	$attachment_id = wp_insert_attachment(
+		array(
+			'post_mime_type' => $content_type,
+			'post_title'     => sanitize_text_field( (string) $base ),
+			'post_content'   => '',
+			'post_status'    => 'inherit',
+		),
+		$written['file']
+	);
+	if ( is_wp_error( $attachment_id ) || ! $attachment_id ) {
+		@unlink( $written['file'] );
+		return new WP_REST_Response( array( 'ok' => false, 'error' => 'could not create the attachment' ), 500 );
+	}
+
+	// Thumbnails and the alt text. Generating the sizes is what makes the image usable in
+	// the library and in responsive srcsets; failing to generate them is not fatal.
+	$metadata = wp_generate_attachment_metadata( $attachment_id, $written['file'] );
+	if ( is_array( $metadata ) ) {
+		wp_update_attachment_metadata( $attachment_id, $metadata );
+	}
+	$alt = sanitize_text_field( (string) $request->get_param( 'alt' ) );
+	if ( '' !== $alt ) {
+		update_post_meta( $attachment_id, '_wp_attachment_image_alt', $alt );
+	}
+	// Marked as ours so an operator can tell platform-pushed media from their own.
+	update_post_meta( $attachment_id, AIOS_PUBLISHER_META_MANAGED, 1 );
+
+	return new WP_REST_Response(
+		array(
+			'ok'  => true,
+			'id'  => (int) $attachment_id,
+			'url' => esc_url_raw( (string) wp_get_attachment_url( $attachment_id ) ),
+		),
+		201
+	);
+}
+
+/**
  * The post meta keys AIOS may write, so the platform can find out which of them
  * this site will actually accept over the WP REST API.
  *
@@ -208,6 +369,24 @@ function aios_publisher_known_meta_keys() {
 		'rank_math_title',
 		'rank_math_description',
 		'rank_math_focus_keyword',
+		// 1.14.0: the social card. Both plugins DERIVE one from the SEO title and
+		// description when these are unset, so their absence was invisible - but the
+		// derivation runs through each plugin's own title template, which made the
+		// card neither controllable nor predictable.
+		'_yoast_wpseo_opengraph-title',
+		'_yoast_wpseo_opengraph-description',
+		'_yoast_wpseo_opengraph-image',
+		'_yoast_wpseo_twitter-title',
+		'_yoast_wpseo_twitter-description',
+		'_yoast_wpseo_twitter-image',
+		'rank_math_facebook_title',
+		'rank_math_facebook_description',
+		'rank_math_facebook_image',
+		'rank_math_twitter_title',
+		'rank_math_twitter_description',
+		'rank_math_twitter_image',
+		'rank_math_twitter_card_type',
+		'rank_math_twitter_use_facebook',
 	);
 }
 
@@ -333,6 +512,13 @@ function aios_publisher_capabilities() {
 		'elementor_pro_version' => $elementor_pro_ver,
 		'elementor_widgets'    => $widgets,
 		'gutenberg'            => $gutenberg,
+		// Whether this site accepts images PUSHED BY VALUE (POST /media). The platform
+		// asks rather than assumes: an older plugin has no such route, and a caller that
+		// pushed to it would get a 404 it could only interpret as "the site is broken".
+		// With this flag it pushes when it can and falls back to sending a URL when it
+		// cannot, which is exactly the 1.7.0 behaviour.
+		'media_push'           => true,
+		'media_push_max_bytes' => AIOS_PUBLISHER_MAX_MEDIA_BYTES,
 		'registered_meta_keys' => array(
 			'post' => aios_publisher_registered_meta_keys( 'post' ),
 			'page' => aios_publisher_registered_meta_keys( 'page' ),

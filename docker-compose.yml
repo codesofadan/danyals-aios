@@ -109,9 +109,26 @@ x-app-env: &app-env
   GOOGLE_OAUTH_CLIENT_ID: ${GOOGLE_OAUTH_CLIENT_ID:-}
   GOOGLE_OAUTH_CLIENT_SECRET: ${GOOGLE_OAUTH_CLIENT_SECRET:-}
   GOOGLE_OAUTH_REDIRECT_URI: ${GOOGLE_OAUTH_REDIRECT_URI:-}
-  # Content article images (OpenAI-compatible). Model preset; key awaited → placeholder.
+  # Content article images (OpenAI-compatible). Key awaited → placeholder.
+  #
+  # THESE FALLBACKS OVERRIDE THE CODE DEFAULT. A `${VAR:-literal}` in compose is not
+  # documentation: the literal is what the container gets whenever the stack env does
+  # not set the key, so app/config.py never gets a say. This one had gone two
+  # generations stale - it still said `gpt-image-1` while the code had moved to
+  # `gpt-image-2` and then `gpt-image-2.5-flare`, so production generated against a
+  # superseded model and said nothing. gpt-image-1 is also being RETIRED by OpenAI on
+  # 2026-10-23, at which point that fallback would have stopped working outright.
+  # Keep these in step with app/config.py; tests/test_deploy_env_template.py asserts it.
   IMAGE_GEN_API_KEY: ${IMAGE_GEN_API_KEY:-}
-  IMAGE_GEN_MODEL: ${IMAGE_GEN_MODEL:-gpt-image-1}
+  IMAGE_GEN_MODEL: ${IMAGE_GEN_MODEL:-gpt-image-2.5-flare}
+  # The quality rung, chosen rather than left to the provider's adaptive `auto`
+  # (measured: 343 output tokens at medium vs 5,488 at high - a 16x billing tail).
+  IMAGE_GEN_QUALITY: ${IMAGE_GEN_QUALITY:-medium}
+  # The encoding. Measured on one generation, identical token bill: PNG 1.92 MB vs
+  # WebP(q82) 0.12 MB. Five images a page is megabytes of PNG in the LCP of a page
+  # whose entire purpose is to rank.
+  IMAGE_GEN_FORMAT: ${IMAGE_GEN_FORMAT:-webp}
+  IMAGE_GEN_COMPRESSION: ${IMAGE_GEN_COMPRESSION:-82}
   # How many pictures a page gets. The code default is ONE (a hero only);
   # a full page wants one per section. Passed through explicitly because a
   # value set only in the stack environment never reaches the container.

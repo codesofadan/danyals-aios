@@ -153,313 +153,320 @@ export default function Web2ArticleWizard({ onClose }: { onClose: () => void }) 
   };
 
   return (
-    <div className="modal-scrim" onClick={onClose}>
-      <div className="modal wide" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-h">
-          <div>
-            <div className="modal-t">Write a new Web 2.0 article</div>
-            <div className="modal-s">{STEP_LABEL[step]}</div>
+    // Self-wrapped in `.tw` because the overlay styles are scoped `.tw .modal-scrim`
+    // in globals.css and the ADMIN LAYOUT DOES NOT PROVIDE ONE. Without it this
+    // renders inline as a card in the page flow — visibly a modal that is not one,
+    // with the table it covers still scrolling underneath. Same fix as
+    // CitationCampaignModal, which carries the same note.
+    <div className="tw">
+      <div className="modal-scrim" onClick={onClose}>
+        <div className="modal wide" onClick={(e) => e.stopPropagation()}>
+          <div className="modal-h">
+            <div>
+              <div className="modal-t">Write a new Web 2.0 article</div>
+              <div className="modal-s">{STEP_LABEL[step]}</div>
+            </div>
+            <button type="button" className="modal-x" onClick={onClose} aria-label="Close">
+              <span className="material-symbols-rounded">close</span>
+            </button>
           </div>
-          <button type="button" className="modal-x" onClick={onClose} aria-label="Close">
-            <span className="material-symbols-rounded">close</span>
-          </button>
-        </div>
 
-        <div className="wiz-body">
-          {error && <div className="note bad" style={{ marginBottom: 12 }}>{error}</div>}
+          <div className="wiz-body">
+            {error && <div className="note bad" style={{ marginBottom: 12 }}>{error}</div>}
 
-          {/* ---------------------------------------------- 1 · the client */}
-          {step === "client" && (
-            <>
-              <div className="fld">
-                <label>Which client is this for?</label>
-                <select
-                  value={clientId}
-                  onChange={(e) => setClientId(e.target.value)}
-                  disabled={clientsQ.isError || clientsQ.isLoading}
-                >
-                  <option value="">
-                    {clientsQ.isError
-                      ? "Couldn't load clients — try again"
-                      : clientsQ.isLoading
-                        ? "Loading clients…"
-                        : "Choose a client…"}
-                  </option>
-                  {clients.map((c) => (
-                    <option key={c.id} value={c.id}>{c.cn}</option>
-                  ))}
-                </select>
-                <div className="fld-hint">
-                  Everything after this is scoped to the client — their business facts
-                  ground the article, and their connected accounts decide where it can
-                  publish.
-                </div>
-              </div>
-              <div className="modal-f">
-                <button type="button" className="ghostbtn" onClick={onClose}>Cancel</button>
-                <button
-                  type="button" className="primary-btn"
-                  disabled={!clientId} onClick={() => setStep("brief")}
-                >
-                  Continue
-                </button>
-              </div>
-            </>
-          )}
-
-          {/* ---------------------------------------------- 2 · the brief */}
-          {step === "brief" && (
-            <>
-              <div className="fld-hint" style={{ marginBottom: 12 }}>
-                Writing for <b>{clientName}</b>. The platform is chosen for you — you
-                decide where it goes out after you have read it.
-              </div>
-
-              <div className="fld">
-                <label>Topic — what the article is about</label>
-                <input
-                  value={topic}
-                  onChange={(e) => setTopic(e.target.value)}
-                  placeholder="what a CCTV drain survey actually shows"
-                />
-                <div className="fld-hint">
-                  Not the same thing as the anchor. With no topic the writer is handed the
-                  LINK TEXT as its subject, and the article ends up about its own anchor.
-                </div>
-              </div>
-
-              <div className="fld">
-                <label>Anchor text — the words that carry the link</label>
-                <input
-                  value={anchor}
-                  onChange={(e) => setAnchor(e.target.value)}
-                  onBlur={verifyAnchor}
-                  placeholder="gentle dental cleanings"
-                />
-                {anchorVerdict && !anchorVerdict.allowed && (
-                  <div className="note bad" style={{ marginTop: 6 }}>
-                    {anchorVerdict.reason}
-                    {anchorVerdict.suggestion && (
-                      <div style={{ marginTop: 4 }}>Try: <b>{anchorVerdict.suggestion}</b></div>
-                    )}
-                  </div>
-                )}
-                {anchorVerdict?.allowed && (
-                  <div className="fld-hint" style={{ color: "var(--ok, #1d6a55)" }}>
-                    Anchor accepted.
-                  </div>
-                )}
-              </div>
-
-              <div className="fld">
-                <label>Link target — the page this should rank</label>
-                <input
-                  value={targetUrl}
-                  onChange={(e) => setTargetUrl(e.target.value)}
-                  placeholder="https://client.example/services/drain-surveys"
-                />
-              </div>
-
-              <div className="fld">
-                <label>Page type</label>
-                <select value={pageType} onChange={(e) => setPageType(e.target.value as typeof pageType)}>
-                  <option value="blog">Blog post</option>
-                  <option value="service">Service page</option>
-                  <option value="local">Local page</option>
-                </select>
-              </div>
-
-              <div className="fld">
-                <label>Proof points — one per line</label>
-                <textarea
-                  rows={4}
-                  value={proof}
-                  onChange={(e) => setProof(e.target.value)}
-                  placeholder={"We ran 240 drain surveys in Leeds last year\nOur camera reaches 90m of pipe"}
-                />
-                <div className="fld-hint">
-                  First-hand facts only. Without them the writer marks its gaps with
-                  <b> [NEEDS: …]</b> and the draft publishes as a placeholder — so this
-                  is the field that decides whether the article is any good.
-                </div>
-              </div>
-
-              <div className="modal-f">
-                <button type="button" className="ghostbtn" onClick={() => setStep("client")}>Back</button>
-                <button
-                  type="button" className="primary-btn"
-                  disabled={!canWrite || plan.isPending} onClick={write}
-                >
-                  {plan.isPending ? "Starting…" : "Generate the article"}
-                </button>
-              </div>
-            </>
-          )}
-
-          {/* ---------------------------------------------- 3 · read + approve */}
-          {step === "review" && (
-            <>
-              {/* Still being written. A real state, so it is named rather than shown as
-                  an empty page. */}
-              {(!draft || draft.status === "draft") && !draftQ.isError && (
-                <div className="op-empty">
-                  <b>Writing the article…</b>
-                  <div className="fld-hint" style={{ marginTop: 6 }}>
-                    The writer researches, drafts and self-checks. This takes a few
-                    seconds — the page updates itself when it is ready.
+            {/* ---------------------------------------------- 1 · the client */}
+            {step === "client" && (
+              <>
+                <div className="fld">
+                  <label>Which client is this for?</label>
+                  <select
+                    value={clientId}
+                    onChange={(e) => setClientId(e.target.value)}
+                    disabled={clientsQ.isError || clientsQ.isLoading}
+                  >
+                    <option value="">
+                      {clientsQ.isError
+                        ? "Couldn't load clients — try again"
+                        : clientsQ.isLoading
+                          ? "Loading clients…"
+                          : "Choose a client…"}
+                    </option>
+                    {clients.map((c) => (
+                      <option key={c.id} value={c.id}>{c.cn}</option>
+                    ))}
+                  </select>
+                  <div className="fld-hint">
+                    Everything after this is scoped to the client — their business facts
+                    ground the article, and their connected accounts decide where it can
+                    publish.
                   </div>
                 </div>
-              )}
-
-              {draftQ.isError && (
-                <div className="note bad">
-                  Couldn&apos;t load the draft — {(draftQ.error as Error)?.message ?? "try again"}.
-                </div>
-              )}
-
-              {/* The write FAILED. Its recorded reason is the useful thing - an
-                  exhausted provider budget and a network outage send an operator to
-                  completely different places. */}
-              {draft && draft.status === "failed" && (
-                <div className="note bad">
-                  <b>The writer could not finish this article.</b>
-                  <div style={{ marginTop: 6 }}>{draft.reason || "No reason was recorded."}</div>
-                </div>
-              )}
-
-              {draft && draft.status === "needs_review" && (
-                <>
-                  <div className="fld-hint" style={{ marginBottom: 10 }}>
-                    Written for <b>{clientName}</b> · platform <b>{draft.platform}</b>
-                    {draft.lane === "extension"
-                      ? " (extension lane — an operator publishes there by hand)"
-                      : " (connected API)"}
-                  </div>
-
-                  {draft.needs.length > 0 && (
-                    <div className="note" style={{ marginBottom: 10 }}>
-                      <b>This draft has {draft.needs.length} unfilled gap(s).</b>
-                      <ul style={{ margin: "6px 0 0 18px" }}>
-                        {draft.needs.map((n, i) => <li key={i}>{n}</li>)}
-                      </ul>
-                      <div style={{ marginTop: 6 }}>
-                        Publishing it now publishes those markers. Reject, add the missing
-                        proof points, and write it again.
-                      </div>
-                    </div>
-                  )}
-
-                  {draft.blocks.map((b) => (
-                    <div className="fld" key={b.key}>
-                      <label>{b.label}</label>
-                      {b.key === "body" ? (
-                        <div
-                          style={{
-                            whiteSpace: "pre-wrap", maxHeight: 340, overflowY: "auto",
-                            border: "1px solid var(--line, #d3dbe3)", borderRadius: 6,
-                            padding: "10px 12px", fontSize: 14, lineHeight: 1.55,
-                          }}
-                        >
-                          {b.value}
-                        </div>
-                      ) : (
-                        <div style={{ fontWeight: 600, wordBreak: "break-word" }}>{b.value}</div>
-                      )}
-                    </div>
-                  ))}
-
-                  <div className="fld-hint" style={{ marginTop: 14, marginBottom: 6 }}>
-                    <b>Where should it go?</b> You can use BOTH — the same article can
-                    publish through a connected API and go to an operator for a second
-                    platform. That is two placements and two links.
-                  </div>
-
-                  {(sent.connected || sent.extension) && (
-                    <div className="op-flash" style={{ position: "static", display: "block", marginBottom: 10 }}>
-                      {sent.connected && (
-                        <div>
-                          <b>Publishing to {sent.connected}</b> through its API — the live
-                          URL appears in Placements once the post exists and our link has
-                          been found on it.
-                        </div>
-                      )}
-                      {sent.extension && (
-                        <div style={{ marginTop: sent.connected ? 6 : 0 }}>
-                          <b>Handed to the extension for {sent.extension}</b> — it is in the
-                          Web 2.0 tab as copy-blocks; the operator pastes the public URL
-                          back and the server checks it.
-                        </div>
-                      )}
-                      {sent.connected && sent.extension && (
-                        <div style={{ marginTop: 6 }}>
-                          Both lanes are done. The similarity gate recorded a verdict on
-                          the second placement — the same prose on two platforms is
-                          exactly what it watches for.
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  <div className="modal-f" style={{ flexWrap: "wrap", gap: 8 }}>
-                    {/* Reject disappears once anything has gone out: the article is
-                        live or queued, and "reject" would claim to undo a publish it
-                        cannot reach. */}
-                    {!anySent && (
-                      <button type="button" className="ghostbtn" onClick={reject} disabled={busy}>
-                        Reject
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      className={sent.connected ? "ghostbtn" : "primary-btn"}
-                      onClick={() => decide("connected")}
-                      disabled={busy || !!sent.connected}
-                      title={
-                        sent.connected
-                          ? `Already sent to ${sent.connected}.`
-                          : "Publishes through a connected platform's API and returns the live URL. If this platform has no connected account, the article is moved to one that does."
-                      }
-                    >
-                      <span className="material-symbols-rounded">
-                        {sent.connected ? "check" : "publish"}
-                      </span>
-                      {sent.connected ? `Published to ${sent.connected}` : "Publish to direct API"}
-                    </button>
-                    <button
-                      type="button"
-                      className={sent.extension ? "ghostbtn" : "primary-btn"}
-                      onClick={() => decide("extension")}
-                      disabled={busy || !!sent.extension}
-                      title={
-                        sent.extension
-                          ? `Already handed to the extension for ${sent.extension}.`
-                          : "Hands the article to an operator: it appears in the extension's Web 2.0 tab as copy-blocks, they publish it in their own logged-in session and paste the public URL back."
-                      }
-                    >
-                      <span className="material-symbols-rounded">
-                        {sent.extension ? "check" : "extension"}
-                      </span>
-                      {sent.extension ? `Sent for ${sent.extension}` : "Forward to extension"}
-                    </button>
-                    {anySent && (
-                      <button type="button" className="ghostbtn" onClick={onClose}>
-                        Done
-                      </button>
-                    )}
-                  </div>
-                </>
-              )}
-
-              {draft && draft.status === "failed" && (
                 <div className="modal-f">
-                  <button type="button" className="ghostbtn" onClick={() => setStep("brief")}>
-                    Back to the brief
+                  <button type="button" className="ghostbtn" onClick={onClose}>Cancel</button>
+                  <button
+                    type="button" className="primary-btn"
+                    disabled={!clientId} onClick={() => setStep("brief")}
+                  >
+                    Continue
                   </button>
                 </div>
-              )}
-            </>
-          )}
+              </>
+            )}
 
+            {/* ---------------------------------------------- 2 · the brief */}
+            {step === "brief" && (
+              <>
+                <div className="fld-hint" style={{ marginBottom: 12 }}>
+                  Writing for <b>{clientName}</b>. The platform is chosen for you — you
+                  decide where it goes out after you have read it.
+                </div>
+
+                <div className="fld">
+                  <label>Topic — what the article is about</label>
+                  <input
+                    value={topic}
+                    onChange={(e) => setTopic(e.target.value)}
+                    placeholder="what a CCTV drain survey actually shows"
+                  />
+                  <div className="fld-hint">
+                    Not the same thing as the anchor. With no topic the writer is handed the
+                    LINK TEXT as its subject, and the article ends up about its own anchor.
+                  </div>
+                </div>
+
+                <div className="fld">
+                  <label>Anchor text — the words that carry the link</label>
+                  <input
+                    value={anchor}
+                    onChange={(e) => setAnchor(e.target.value)}
+                    onBlur={verifyAnchor}
+                    placeholder="gentle dental cleanings"
+                  />
+                  {anchorVerdict && !anchorVerdict.allowed && (
+                    <div className="note bad" style={{ marginTop: 6 }}>
+                      {anchorVerdict.reason}
+                      {anchorVerdict.suggestion && (
+                        <div style={{ marginTop: 4 }}>Try: <b>{anchorVerdict.suggestion}</b></div>
+                      )}
+                    </div>
+                  )}
+                  {anchorVerdict?.allowed && (
+                    <div className="fld-hint" style={{ color: "var(--ok, #1d6a55)" }}>
+                      Anchor accepted.
+                    </div>
+                  )}
+                </div>
+
+                <div className="fld">
+                  <label>Link target — the page this should rank</label>
+                  <input
+                    value={targetUrl}
+                    onChange={(e) => setTargetUrl(e.target.value)}
+                    placeholder="https://client.example/services/drain-surveys"
+                  />
+                </div>
+
+                <div className="fld">
+                  <label>Page type</label>
+                  <select value={pageType} onChange={(e) => setPageType(e.target.value as typeof pageType)}>
+                    <option value="blog">Blog post</option>
+                    <option value="service">Service page</option>
+                    <option value="local">Local page</option>
+                  </select>
+                </div>
+
+                <div className="fld">
+                  <label>Proof points — one per line</label>
+                  <textarea
+                    rows={4}
+                    value={proof}
+                    onChange={(e) => setProof(e.target.value)}
+                    placeholder={"We ran 240 drain surveys in Leeds last year\nOur camera reaches 90m of pipe"}
+                  />
+                  <div className="fld-hint">
+                    First-hand facts only. Without them the writer marks its gaps with
+                    <b> [NEEDS: …]</b> and the draft publishes as a placeholder — so this
+                    is the field that decides whether the article is any good.
+                  </div>
+                </div>
+
+                <div className="modal-f">
+                  <button type="button" className="ghostbtn" onClick={() => setStep("client")}>Back</button>
+                  <button
+                    type="button" className="primary-btn"
+                    disabled={!canWrite || plan.isPending} onClick={write}
+                  >
+                    {plan.isPending ? "Starting…" : "Generate the article"}
+                  </button>
+                </div>
+              </>
+            )}
+
+            {/* ---------------------------------------------- 3 · read + approve */}
+            {step === "review" && (
+              <>
+                {/* Still being written. A real state, so it is named rather than shown as
+                    an empty page. */}
+                {(!draft || draft.status === "draft") && !draftQ.isError && (
+                  <div className="op-empty">
+                    <b>Writing the article…</b>
+                    <div className="fld-hint" style={{ marginTop: 6 }}>
+                      The writer researches, drafts and self-checks. This takes a few
+                      seconds — the page updates itself when it is ready.
+                    </div>
+                  </div>
+                )}
+
+                {draftQ.isError && (
+                  <div className="note bad">
+                    Couldn&apos;t load the draft — {(draftQ.error as Error)?.message ?? "try again"}.
+                  </div>
+                )}
+
+                {/* The write FAILED. Its recorded reason is the useful thing - an
+                    exhausted provider budget and a network outage send an operator to
+                    completely different places. */}
+                {draft && draft.status === "failed" && (
+                  <div className="note bad">
+                    <b>The writer could not finish this article.</b>
+                    <div style={{ marginTop: 6 }}>{draft.reason || "No reason was recorded."}</div>
+                  </div>
+                )}
+
+                {draft && draft.status === "needs_review" && (
+                  <>
+                    <div className="fld-hint" style={{ marginBottom: 10 }}>
+                      Written for <b>{clientName}</b> · platform <b>{draft.platform}</b>
+                      {draft.lane === "extension"
+                        ? " (extension lane — an operator publishes there by hand)"
+                        : " (connected API)"}
+                    </div>
+
+                    {draft.needs.length > 0 && (
+                      <div className="note" style={{ marginBottom: 10 }}>
+                        <b>This draft has {draft.needs.length} unfilled gap(s).</b>
+                        <ul style={{ margin: "6px 0 0 18px" }}>
+                          {draft.needs.map((n, i) => <li key={i}>{n}</li>)}
+                        </ul>
+                        <div style={{ marginTop: 6 }}>
+                          Publishing it now publishes those markers. Reject, add the missing
+                          proof points, and write it again.
+                        </div>
+                      </div>
+                    )}
+
+                    {draft.blocks.map((b) => (
+                      <div className="fld" key={b.key}>
+                        <label>{b.label}</label>
+                        {b.key === "body" ? (
+                          <div
+                            style={{
+                              whiteSpace: "pre-wrap", maxHeight: 340, overflowY: "auto",
+                              border: "1px solid var(--line, #d3dbe3)", borderRadius: 6,
+                              padding: "10px 12px", fontSize: 14, lineHeight: 1.55,
+                            }}
+                          >
+                            {b.value}
+                          </div>
+                        ) : (
+                          <div style={{ fontWeight: 600, wordBreak: "break-word" }}>{b.value}</div>
+                        )}
+                      </div>
+                    ))}
+
+                    <div className="fld-hint" style={{ marginTop: 14, marginBottom: 6 }}>
+                      <b>Where should it go?</b> You can use BOTH — the same article can
+                      publish through a connected API and go to an operator for a second
+                      platform. That is two placements and two links.
+                    </div>
+
+                    {(sent.connected || sent.extension) && (
+                      <div className="op-flash" style={{ position: "static", display: "block", marginBottom: 10 }}>
+                        {sent.connected && (
+                          <div>
+                            <b>Publishing to {sent.connected}</b> through its API — the live
+                            URL appears in Placements once the post exists and our link has
+                            been found on it.
+                          </div>
+                        )}
+                        {sent.extension && (
+                          <div style={{ marginTop: sent.connected ? 6 : 0 }}>
+                            <b>Handed to the extension for {sent.extension}</b> — it is in the
+                            Web 2.0 tab as copy-blocks; the operator pastes the public URL
+                            back and the server checks it.
+                          </div>
+                        )}
+                        {sent.connected && sent.extension && (
+                          <div style={{ marginTop: 6 }}>
+                            Both lanes are done. The similarity gate recorded a verdict on
+                            the second placement — the same prose on two platforms is
+                            exactly what it watches for.
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    <div className="modal-f" style={{ flexWrap: "wrap", gap: 8 }}>
+                      {/* Reject disappears once anything has gone out: the article is
+                          live or queued, and "reject" would claim to undo a publish it
+                          cannot reach. */}
+                      {!anySent && (
+                        <button type="button" className="ghostbtn" onClick={reject} disabled={busy}>
+                          Reject
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        className={sent.connected ? "ghostbtn" : "primary-btn"}
+                        onClick={() => decide("connected")}
+                        disabled={busy || !!sent.connected}
+                        title={
+                          sent.connected
+                            ? `Already sent to ${sent.connected}.`
+                            : "Publishes through a connected platform's API and returns the live URL. If this platform has no connected account, the article is moved to one that does."
+                        }
+                      >
+                        <span className="material-symbols-rounded">
+                          {sent.connected ? "check" : "publish"}
+                        </span>
+                        {sent.connected ? `Published to ${sent.connected}` : "Publish to direct API"}
+                      </button>
+                      <button
+                        type="button"
+                        className={sent.extension ? "ghostbtn" : "primary-btn"}
+                        onClick={() => decide("extension")}
+                        disabled={busy || !!sent.extension}
+                        title={
+                          sent.extension
+                            ? `Already handed to the extension for ${sent.extension}.`
+                            : "Hands the article to an operator: it appears in the extension's Web 2.0 tab as copy-blocks, they publish it in their own logged-in session and paste the public URL back."
+                        }
+                      >
+                        <span className="material-symbols-rounded">
+                          {sent.extension ? "check" : "extension"}
+                        </span>
+                        {sent.extension ? `Sent for ${sent.extension}` : "Forward to extension"}
+                      </button>
+                      {anySent && (
+                        <button type="button" className="ghostbtn" onClick={onClose}>
+                          Done
+                        </button>
+                      )}
+                    </div>
+                  </>
+                )}
+
+                {draft && draft.status === "failed" && (
+                  <div className="modal-f">
+                    <button type="button" className="ghostbtn" onClick={() => setStep("brief")}>
+                      Back to the brief
+                    </button>
+                  </div>
+                )}
+              </>
+            )}
+
+          </div>
         </div>
       </div>
     </div>

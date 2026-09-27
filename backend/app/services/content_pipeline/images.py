@@ -114,9 +114,18 @@ def _scene_offset(seed: str) -> int:
 _MAX_AUTHORED_SCENES = 8
 
 
-def _scene_prompt(ctx: PipelineContext, slots: Sequence[tuple[str, str]]) -> str:
-    """Ask for ONE concrete, literal scene per slot, grounded in this page's subject."""
-    sections = "\n".join(f"{i + 1}. {alt}" for i, (_slot, alt) in enumerate(slots))
+def _scene_prompt(ctx: PipelineContext, slots: Sequence[tuple[str, str, str]]) -> str:
+    """Ask for ONE concrete, literal scene per slot, grounded in THAT SECTION'S CONTENT.
+
+    The section's own text is what the picture has to be about. Until this carried it, the
+    author was handed three words of heading and nothing else, so it invented a scene for
+    a heading rather than for the page - which is the difference between a photograph of
+    the subject and a photograph of an office.
+    """
+    sections = "\n".join(
+        f"{i + 1}. {alt}" + (f"\n   what this section says: {body}" if body else "")
+        for i, (_slot, alt, body) in enumerate(slots)
+    )
     subject = ctx.title or ctx.primary_keyword
     where = f" in {ctx.geo}" if ctx.geo else ""
     who = f" for {ctx.client_name}" if ctx.client_name else ""
@@ -127,12 +136,25 @@ def _scene_prompt(ctx: PipelineContext, slots: Sequence[tuple[str, str]]) -> str
         "CONCRETE, LITERAL, PHYSICAL scene a photographer could walk into and shoot:",
         "real objects, real people doing a real thing, a real place, real light.",
         "",
+        "REGISTER: modern, professional, premium - how a real company photographs its own",
+        "work. Contemporary equipment, considered light, never dated stock imagery and",
+        "never a generic lifestyle shot that could illustrate any article at all.",
+        "",
+        "EACH SCENE MUST SHOW WHAT ITS OWN SECTION IS ABOUT. The section text is given",
+        "below - read it and photograph THAT. Where the section is digital or analytical,",
+        "its real artifacts are the honest picture: a monitor or laptop showing a rising",
+        "line graph, a dashboard of bar charts, a tablet held mid-review, data on a screen",
+        "in a meeting room. Where it is physical work, photograph the work being done.",
+        "",
         "HARD RULES, each of which the image model will otherwise break:",
         "- Never name the topic, the industry or any abstract noun as the SUBJECT.",
         "  Handed an abstract subject the model renders it as TITLE TEXT and returns a",
         "  flat vector infographic. Describe only what is physically in frame.",
-        "- No text, letters, words, numbers, signage, labels, logos, packaging copy,",
-        "  screens showing text, charts, diagrams, icons or infographics.",
+        "- SCREENS AND CHARTS ARE ALLOWED and are often the best answer. What is banned is",
+        "  READABLE CONTENT: describe graphs, lines and bars as shapes, with every label",
+        "  too small or too soft to read. The model garbles letters, not geometry.",
+        "- No legible text, words, letters or numbers; no logos, brand marks or signage;",
+        "  no flat infographics, icons, diagrams-as-artwork or collages.",
         "- No brand names and no recognisable real person.",
         "- One scene per entry, 20-40 words, no preamble and no numbering in the value.",
         "",
@@ -158,6 +180,67 @@ def _parse_scenes(raw: str, wanted: int) -> list[str]:
     # A reply that lost slots is still useful - the caller pads from the bank - but a
     # reply of the wrong SHAPE (objects, nested lists) is not.
     return scenes[:wanted]
+
+
+#: How much of a section to show the scene author. Enough to know what the section is
+#: actually about; not so much that eight of them crowd out the instructions.
+_CONTEXT_CHARS = 320
+
+
+def _section_text(ctx: PipelineContext, heading: str) -> str:
+    """What the section under ``heading`` actually says, for the scene author.
+
+    Read from the COMPOSED slots when the page has them - that is the page as structured
+    data, so the text belongs to a KNOWN section rather than being guessed at by scanning
+    markdown for the next heading. Falls back to the markdown scan for a prose page, which
+    is the only shape that has no slots.
+    """
+    wanted = heading.strip().lower()
+    for section in ctx.sections or []:
+        if not isinstance(section, dict):
+            continue
+        if wanted and str(section.get("heading") or "").strip().lower() != wanted:
+            continue
+        return _flatten(section.get("data"))[:_CONTEXT_CHARS]
+    return _markdown_section(ctx.draft_md, heading)[:_CONTEXT_CHARS]
+
+
+def _flatten(data: Any) -> str:
+    """Every string in a slot payload, in order, as one line of prose."""
+    out: list[str] = []
+
+    def walk(value: Any) -> None:
+        if isinstance(value, str):
+            text = value.strip()
+            if text:
+                out.append(text)
+        elif isinstance(value, dict):
+            for item in value.values():
+                walk(item)
+        elif isinstance(value, (list, tuple)):
+            for item in value:
+                walk(item)
+
+    walk(data)
+    return " ".join(out)
+
+
+def _markdown_section(draft_md: str, heading: str) -> str:
+    """The prose under one H2 of a markdown draft - the prose path's equivalent."""
+    wanted = heading.strip().lower()
+    body: list[str] = []
+    collecting = not wanted  # no heading -> the opening paragraphs
+    for raw in (draft_md or "").splitlines():
+        line = raw.strip()
+        match = _H2_RE.match(line)
+        if match:
+            if collecting and body:
+                break
+            collecting = match.group(1).strip().lower() == wanted
+            continue
+        if collecting and line and not line.startswith("#"):
+            body.append(line)
+    return " ".join(body)
 
 
 def plan_images(
@@ -191,13 +274,13 @@ def plan_images(
     if not hero_alt:
         return ()
 
-    slots: list[tuple[str, str]] = [("hero", hero_alt)]
+    slots: list[tuple[str, str, str]] = [("hero", hero_alt, _section_text(ctx, "hero"))]
     for heading in h2s:
         if len(slots) >= max_images:
             break
         if not heading:
             continue
-        slots.append((f"section:{_slug(heading)}", heading))
+        slots.append((f"section:{_slug(heading)}", heading, _section_text(ctx, heading)))
 
     # TOPICAL SCENES, authored once per page.
     #
@@ -238,7 +321,7 @@ def plan_images(
             ),
             alt=alt,
         )
-        for i, (slot, alt) in enumerate(slots)
+        for i, (slot, alt, _body) in enumerate(slots)
     )
 
 

@@ -92,10 +92,36 @@ class PipelineContext:
     # in landing-page section divs. The page read as a blog post wearing a landing
     # page's CSS, because that is exactly what it was.
     blueprint_sections: tuple[tuple[str, str], ...] = ()
+    #: THE RESOLVED WIREFRAME, whole - every ``SectionSpec`` including the chrome ones,
+    #: with each slot's evidence requirement and measured capacities intact.
+    #:
+    #: `blueprint_sections` above is a FLATTENING of this, kept because the outline only
+    #: ever needed (kind, heading). The compose stage needs the rest: which slots are
+    #: evidence-gated, how many cards a grid holds, how long a heading may be. It used to
+    #: re-resolve the blueprint itself from `brief["template"]` - a key the worker never
+    #: writes - so every templated page silently fell back to its page type's default
+    #: template. An `about` page published as a service page, and nothing said so.
+    #:
+    #: Typed loosely to keep this module free of a service import; the entries are
+    #: `app.services.page_blueprints.SectionSpec`.
+    blueprint: tuple[Any, ...] = ()
     proof_signals: frozenset[str] = field(default_factory=frozenset)
     facts: tuple[str, ...] = ()
+    #: The job's ``source_pack``: the client's first-party material (proof points,
+    #: testimonials, prices, team, service areas), the chosen template, the design
+    #: profile and the publish target. THE EVIDENCE GATE READS THIS - a slot is written
+    #: only when the client actually supplied what it would be built from - so an empty
+    #: pack here is indistinguishable from a client who supplied nothing, and drops every
+    #: gated section from the page. It was empty on every run until this field existed.
+    source_pack: dict[str, Any] = field(default_factory=dict)
     brief: dict[str, Any] = field(default_factory=dict)
     outline: dict[str, Any] = field(default_factory=dict)
+    #: THE PAGE AS DATA - one typed payload per wireframe slot, written by `compose`.
+    #: This is the source of truth for a TEMPLATED page: the renderers build the hero, the
+    #: grids, the steps, the accordion and the price table from it. `draft_md` is then a
+    #: rendering of it (for review, QA and the text-level guards), not the other way round,
+    #: which is the inversion the whole compose stage exists to make.
+    sections: list[dict[str, Any]] = field(default_factory=list)
     draft_md: str = ""
     title: str = ""
     meta_description: str = ""

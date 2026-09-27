@@ -37,7 +37,12 @@ import type {
   QueueCompleteResult,
   QueueItem,
   OffpageKpis,
+  PlacedLinkBoard,
+  PlacedLinkState,
+  Web2BroadcastInput,
+  Web2BroadcastPlan,
   Web2Campaign,
+  Web2ConnectionPlan,
   Web2Account,
   Web2AccountCheck,
   Web2AnchorCheck,
@@ -443,6 +448,12 @@ export type Web2ClientIdentity = {
   imapUser: string;
   imapPasswordHeld: boolean;
   mailboxReady: boolean;
+  /** The ONE login this client uses across every platform (0151). Distinct from
+   *  `handleBase`, which is the public handle printed on a property. */
+  username: string;
+  /** Whether a password is SEALED — never the password. The vault is not opened to
+   *  answer a question about whether something is held. */
+  passwordHeld: boolean;
   /** The standing grounding pack every campaign for this client reuses. */
   proofPoints: string[];
   testimonials: string[];
@@ -459,6 +470,12 @@ export type Web2ClientIdentityInput = {
   /** Write-only. Blank LEAVES an existing seal alone; clearing is explicit. */
   imapPassword?: string;
   clearImapPassword?: boolean;
+  username?: string;
+  /** Write-only, sealed into the vault, never read back. Same blank-is-not-clear rule
+   *  as the mailbox password — a form that round-trips an empty field must not silently
+   *  drop the credential that unlocks every platform this client is on. */
+  password?: string;
+  clearPassword?: boolean;
   proofPoints?: string[];
   testimonials?: string[];
   uniqueData?: string[];
@@ -486,7 +503,59 @@ export function useSaveWeb2ClientIdentity(clientId?: string) {
       ),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["web2-identity", clientId ?? ""] });
+      // The shared login is an INPUT to readiness, so saving it changes the connection
+      // plan's answer. Without this the operator saves a password and the screen above
+      // keeps insisting no shared login is set.
+      void qc.invalidateQueries({ queryKey: ["web2-connection-plan", clientId ?? ""] });
     },
+  });
+}
+
+/** What this client's ONE login can and cannot reach, platform by platform.
+ *
+ *  Deliberately not cached long: it is derived from the sealed-credential state, and
+ *  the operator's whole loop here is "connect one thing, look again". */
+export function useWeb2ConnectionPlan(clientId?: string) {
+  return useQuery({
+    queryKey: ["web2-connection-plan", clientId ?? ""],
+    queryFn: () =>
+      api.get<Web2ConnectionPlan>(
+        `/offpage/web2/clients/${encodeURIComponent(clientId!)}/connection-plan`,
+      ),
+    enabled: !!clientId,
+  });
+}
+
+/** Compose once, tick the platforms (or All), and see the whole fan-out.
+ *
+ *  A MUTATION rather than a query because it is an operator ACTION with a body, but it
+ *  writes nothing: no draft, no property, no spend. The commit is a separate, explicit
+ *  step — which is the point, since the alternative is discovering at the review gate
+ *  that nine of twenty platforms were excluded after paying for twenty drafting runs. */
+export function usePlanWeb2Broadcast() {
+  return useMutation({
+    mutationFn: (body: Web2BroadcastInput) =>
+      api.post<Web2BroadcastPlan>("/offpage/web2/broadcast/plan", body),
+  });
+}
+
+/** The placed-link ledger (A8) — every outbound link, and what became of it.
+ *
+ *  Server-ordered LOST-FIRST; the client must not re-sort by date, which is exactly
+ *  what buries the three rows anybody needs to act on under two hundred that are fine. */
+export function usePlacedLinks(opts?: { clientId?: string; state?: PlacedLinkState | "" }) {
+  const clientId = opts?.clientId ?? "";
+  const state = opts?.state ?? "";
+  return useQuery({
+    queryKey: ["placed-links", clientId, state],
+    queryFn: () => {
+      const qs = new URLSearchParams();
+      if (clientId) qs.set("clientId", clientId);
+      if (state) qs.set("state", state);
+      const suffix = qs.toString();
+      return api.get<PlacedLinkBoard>(`/offpage/placed-links${suffix ? `?${suffix}` : ""}`);
+    },
+    refetchInterval: 60_000,
   });
 }
 

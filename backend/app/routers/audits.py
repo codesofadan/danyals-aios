@@ -40,9 +40,13 @@ from app.schemas.audits import (
     AuditEstimateResponse,
     AuditPublicPageResponse,
     AuditPublicPageUpdate,
+    AuditRefreshItem,
+    AuditRefreshRequest,
+    AuditRefreshResponse,
     AuditReingestResponse,
     AuditResponse,
     AuditStatsResponse,
+    AuditTier,
     AuditVisibilityUpdate,
     compute_audit_stats,
     tier_to_db,
@@ -94,6 +98,11 @@ _AUDIT_NOT_FOUND = HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="
 _ARTIFACT_NOT_FOUND = HTTPException(
     status_code=status.HTTP_404_NOT_FOUND, detail="Artifact not available"
 )
+
+
+def _iso_or_none(value: Any) -> str | None:
+    """An ISO timestamp, or None - never the string "None" in a response body."""
+    return value.isoformat() if isinstance(value, datetime) else None
 
 
 def get_artifact_store(settings: SettingsDep) -> LocalArtifactStore | None:
@@ -255,6 +264,11 @@ async def get_audit(
     if page_row and page_row.get("published"):
         resp.public_slug = str(page_row["slug"])
         resp.public_url = public_page_url(settings, str(page_row["slug"]))
+        # The follow-up signal (0161): an operator who shared a link wants to know whether
+        # it was opened, and this is the screen they are on when they ask.
+        resp.public_views = int(page_row.get("views") or 0)
+        resp.public_last_viewed = _iso_or_none(page_row.get("last_viewed_at"))
+        resp.public_expires_at = _iso_or_none(page_row.get("expires_at"))
     return resp
 
 
@@ -707,6 +721,18 @@ async def set_audit_public_page(
     )
     if row is None:
         raise _AUDIT_NOT_FOUND
+    # THE EXPIRY IS ITS OWN WRITE (0161), applied after the publish and only when the body
+    # actually asked for it. Folding it into the publish update would make every publish
+    # silently reset an expiry somebody had set - two different decisions sharing one
+    # statement is how one of them gets lost.
+    if body.clear_expiry or body.expires_at is not None:
+        expiry_row = await asyncio.to_thread(
+            repo.set_public_page_expiry,
+            audit_id,
+            expires_at=None if body.clear_expiry else body.expires_at,
+        )
+        if expiry_row is not None:
+            row = expiry_row
     await record_activity(
         actor,
         kind="audit",
@@ -722,6 +748,9 @@ async def set_audit_public_page(
         url=public_page_url(settings, str(row["slug"])),
         published=bool(row["published"]),
         kind=str(row["kind"]),
+        views=int(row.get("views") or 0),
+        last_viewed_at=row.get("last_viewed_at"),
+        expires_at=row.get("expires_at"),
     )
 
 
@@ -785,4 +814,154 @@ async def reingest_audit_findings(
         workbook_built=result.workbook_built,
         report_built=result.report_built,
         notes=result.notes,
+    )
+
+@router.post(
+    "/audits/refresh",
+    response_model=AuditRefreshResponse,
+    dependencies=[Depends(rate_limit("audit_refresh", 10))],
+)
+async def refresh_client_audits_now(
+    body: AuditRefreshRequest,
+    repo: AuditsRepoDep,
+    clients: ClientsRepoDep,
+    enqueue: AuditEnqueuerDep,
+    gate: PaidAuditGateDep,
+    settings: SettingsDep,
+    actor: RunAudits,
+) -> AuditRefreshResponse:
+    """Re-audit the SELECTED clients now, and say what it will cost before it does.
+
+    WHY A BUTTON AND NOT A SCHEDULE. Every cron entry on this platform is off by the
+    operator's decision, and month-over-month progress reporting needs periodic re-audits -
+    so the recurring job has to be something a person presses. The fan-out task that ran
+    weekly still exists and is unchanged; this is the same work, triggered deliberately, for
+    a chosen set of clients rather than the whole roster.
+
+    IT NEVER HALF-RUNS SILENTLY. A client with no site, over its budget, or blocked by the
+    dial is reported as skipped WITH THE REASON rather than dropped - an operator who picks
+    twelve clients and gets four audits must be able to see why without reading a log.
+
+    The total is quoted and echoed back exactly as a deep single run is: ``POST /audits/
+    estimate`` prices one run, this endpoint prices the set, and the caller resends the
+    figure it was shown. A free-depth sweep spends nothing and therefore needs no
+    confirmation - there is no figure to approve.
+    """
+    depth = body.depth
+    # Typed as the literal the tier helpers take, not a bare str: `free` depth is the only
+    # depth that spends nothing, and that mapping is the same one POST /audits enforces.
+    tier_label: AuditTier = "Free" if depth == "free" else "Paid"
+    pages = planned_pages(settings, depth)
+    per_run = estimate_audit_cost(
+        settings, mode=tier_to_db(tier_label), depth=depth, pages=pages
+    )
+
+    # Resolve each client + its site FIRST, so the quote covers only the runs that can
+    # actually happen. Quoting for a client with no site would present a total nobody is
+    # going to be charged.
+    planned: list[tuple[dict[str, Any], str]] = []
+    items: list[AuditRefreshItem] = []
+    for client_id in body.client_ids:
+        client = await asyncio.to_thread(clients.get_client, client_id)
+        if client is None:
+            items.append(AuditRefreshItem(
+                client_id=client_id, outcome="skipped", reason="this client no longer exists",
+            ))
+            continue
+        sites = await asyncio.to_thread(clients.list_sites, client_id, limit=1, offset=0)
+        domain = str((sites[0] if sites else {}).get("domain") or "").strip()
+        if not domain:
+            items.append(AuditRefreshItem(
+                client_id=client_id, client=str(client.get("name") or ""),
+                outcome="skipped",
+                reason="no site on record, so there is nothing to crawl",
+            ))
+            continue
+        url = domain if domain.startswith(("http://", "https://")) else f"https://{domain}"
+        planned.append((client, url))
+
+    total = round(per_run * len(planned), 4)
+    if total > 0:
+        if body.confirmed_total is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    f"This would run {len(planned)} audits at about ${per_run:.4f} each, "
+                    f"${total:.4f} in total. Resend with confirmedTotal to approve it."
+                ),
+            )
+        if abs(body.confirmed_total - total) > settings.audit_estimate_tolerance_usd:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    f"The total changed since it was quoted (approved ${body.confirmed_total:.4f}, "
+                    f"now ${total:.4f}). Re-read the quote and approve the current figure."
+                ),
+            )
+
+    queued = 0
+    for client, url in planned:
+        client_id = str(client["id"])
+        name = str(client.get("name") or "")
+        # The SSRF guard runs per client, because each one contributes its own URL and a
+        # bad one must skip that client rather than fail the sweep.
+        try:
+            await asyncio.to_thread(validate_public_host, url)
+        except PrivateAddressError as exc:
+            items.append(AuditRefreshItem(
+                client_id=client_id, client=name, url=url, outcome="skipped",
+                reason=f"the site address is not publicly reachable: {exc}",
+            ))
+            continue
+        if tier_label == "Paid":
+            decision = await asyncio.to_thread(gate, client_id, name, per_run)
+            if decision.halted:
+                # The global halt is agency-wide: the rest of the sweep cannot run either,
+                # so stop rather than reporting the same refusal N times.
+                items.append(AuditRefreshItem(
+                    client_id=client_id, client=name, url=url, outcome="skipped",
+                    reason="API spend is halted platform-wide, so nothing further was started",
+                ))
+                break
+            if not decision.allowed:
+                items.append(AuditRefreshItem(
+                    client_id=client_id, client=name, url=url, outcome="skipped",
+                    reason=f"cost controls refused this client: {decision.reason or decision.outcome}",
+                ))
+                continue
+        row = await asyncio.to_thread(
+            repo.insert_audit,
+            {
+                "client_id": client_id,
+                "client_name": name,
+                "url": url,
+                "types": [],
+                "tier": tier_to_db(tier_label),
+                "depth": depth,
+                "max_pages": pages,
+                "estimated_cost": per_run,
+                "status": "queued",
+                # Not shared automatically. A refresh is internal work until somebody
+                # decides the report is worth sending, which is the same rule a
+                # hand-started audit follows.
+                "visible_to_client": False,
+            },
+        )
+        enqueue(str(row["id"]))
+        queued += 1
+        items.append(AuditRefreshItem(
+            client_id=client_id, client=name, url=url, audit_id=str(row["id"]),
+            outcome="queued", estimated_cost=per_run,
+        ))
+
+    await record_activity(
+        actor, kind="audit",
+        action=f"re-audited {queued} client{'' if queued == 1 else 's'}",
+        target=f"{depth} depth",
+    )
+    return AuditRefreshResponse(
+        queued=queued,
+        skipped=sum(1 for i in items if i.outcome == "skipped"),
+        estimated_total=round(per_run * queued, 4),
+        items=items,
     )

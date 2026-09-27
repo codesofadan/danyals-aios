@@ -124,19 +124,22 @@ def content_providers_from_settings(settings: Settings) -> ContentProviders | No
     serp: SerpResearcher = SerperResearcher(api_key=serper_key.get_secret_value())
 
     image_key = settings.image_gen_api_key
-    # gpt-image-2 (like gpt-image-1 before it) returns base64 (b64_json), not a hosted
-    # url, so the real generator is handed an image HOST that decodes + serves the
-    # bytes as a real https URL (None when no artifact root is configured -> a b64
-    # image degrades to skipped).
+    # The gpt-image family returns base64 (b64_json), not a hosted url, so the real
+    # generator is handed an image HOST that decodes + serves the bytes as a real https
+    # URL (None when no artifact root is configured -> a b64 image degrades to skipped).
     images: ImageGenerator = (
         OpenAIImageGenerator(
             api_key=image_key.get_secret_value(),
             model=settings.image_gen_model,
             # Landscape (horizontal rectangle) hero/section images — blog + page layouts
             # are wide, so a square image breaks the layout. Configurable via
-            # image_gen_size (default 1536x1024, supported by both gpt-image-1 and
-            # gpt-image-2).
+            # image_gen_size (default 1536x1024).
             size=settings.image_gen_size,
+            # Explicit, never the provider's adaptive `auto` - see image_gen_quality.
+            quality=settings.image_gen_quality,
+            # WebP by default: same bill, a sixteenth of the page weight.
+            image_format=settings.image_gen_format,
+            compression=settings.image_gen_compression,
             image_host=content_image_store_from_settings(settings),
         )
         if image_key

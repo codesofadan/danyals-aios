@@ -30,6 +30,14 @@ from app.services.content_pipeline.context import PipelineContext, StageResult
 
 # The order pages are produced in. Stage 0 (SCOPE) and stage 1 (KEYWORD DISCOVERY) are
 # ENGAGEMENT-level and run once for a batch, not once per page, so they are not here.
+#
+# NEITHER IS A TOPICAL MAP, and that is now a decision rather than an omission. A
+# `topical_map` stage existed, was in no sequence, had no non-test caller, and was deleted
+# on 2026-09-26 by the operator's call: clusters come from the research recommender, which
+# already returns a pillar plus its supporting pages - one honest cluster per research pass.
+# Planning stays research-led, and the planning tables (`topical_maps`, `topical_map_nodes`)
+# remain as the read-only record they always were. A stage sitting unreached in the package
+# reads as a capability the product has; this one did not.
 PAGE_STAGES: tuple[str, ...] = (
     "sme",           # 3  - the halt
     "research",      # 4
@@ -43,6 +51,29 @@ PAGE_STAGES: tuple[str, ...] = (
     "title_meta",    # 9
     "schema_links",  # 10 - free
     "gate",          # 11
+)
+
+#: THE TEMPLATED PAGE SEQUENCE - a service, location, about, homepage, FAQ or local page,
+#: i.e. everything that is a LAYOUT rather than an article.
+#:
+#: `outline` and `draft` are absent on purpose, and their absence is the fix. An outline is
+#: a plan for prose; a draft is prose. A templated page is neither - its structure is the
+#: wireframe, decided before any writing, and its content is one typed payload per slot.
+#: Running an outline stage here asked a model to invent a structure the template had
+#: already fixed, and then the draft wrote to the invented one.
+#:
+#: `convert`, `voice` and `grounding` are absent for the same reason in reverse: they are
+#: rewrite passes over a document. The equivalent guarantees are enforced inside `compose`
+#: (the fact allow-list in the prompt) and by `scrub_sections` (the claims audit, applied
+#: field by field) rather than by re-writing a page that no longer exists as one document.
+TEMPLATED_STAGES: tuple[str, ...] = (
+    "sme",           # the Experience halt - unchanged
+    "research",      # the live SERP brief - unchanged
+    "compose",       # the wireframe, filled: one typed payload per slot
+    "images",        # hero + prose images, placed into their own sections
+    "title_meta",
+    "schema_links",
+    "gate",
 )
 
 #: The sequence for a REVIEWER'S EDIT, which is not a redraft. The page already

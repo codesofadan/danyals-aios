@@ -41,12 +41,16 @@ def test_content_slots_into_the_right_sections() -> None:
     vis = _kinds(m)
     # The classified blocks land in the matching sections; chrome/unfilled -> hidden.
     assert vis["hero"] is True
-    assert vis["benefits"] is True     # "Why choose us"
+    # `features` is the service template's card grid. It was `benefits` until the
+    # template rewrite; the slot does the same job under the name the wireframe uses.
+    assert vis["features"] is True     # "Why choose us"
     assert vis["process"] is True      # "How it works"
     assert vis["faq"] is True          # FAQ pairs
     assert vis["testimonials"] is True  # from the supplied list
     assert vis["cta"] is True
-    assert vis.get("trust_bar") is False  # chrome with no content -> hidden placeholder
+    # A slot the draft had nothing for stays in the model and is HIDDEN rather than
+    # dropped, so the editor can see the page has a price table it never filled.
+    assert vis.get("pricing") is False
 
 
 def test_hero_and_faq_carry_editable_data() -> None:
@@ -58,8 +62,8 @@ def test_hero_and_faq_carry_editable_data() -> None:
     faq = next(s for s in m.sections if s.kind == "faq")
     qs = [f["q"] for f in faq.data["faq"]]
     assert qs == ["How fast can we go live?", "Is our data safe?"]
-    benefits = next(s for s in m.sections if s.kind == "benefits")
-    titles = {c["title"] for c in benefits.data["cards"]}
+    features = next(s for s in m.sections if s.kind == "features")
+    titles = {c["title"] for c in features.data["cards"]}
     assert "Fast" in titles and "Agents" in titles
 
 

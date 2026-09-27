@@ -199,6 +199,24 @@
 .gw-picked-t { font-size: 13.5px; font-weight: 800; color: var(--fg-strong); }
 .gw-picked-s { font-size: 12px; color: var(--muted); margin-top: 3px; line-height: 1.5; }
 
+/* The Maps-link paste row. Spans the whole form because a shared URL is long and a
+   210px auto-fit column turns it into a keyhole the operator cannot read their own
+   paste through. */
+.gw-field-wide { grid-column: 1 / -1; }
+.gw-paste { display: flex; gap: 8px; align-items: stretch; flex-wrap: wrap; }
+.gw-paste input { flex: 1 1 320px; min-width: 0; }
+.gw-paste .ghostbtn { flex: 0 0 auto; white-space: nowrap; }
+
+/* The NAP-sync consent. Deliberately a full-width row with real line length: this
+   checkbox writes to the record the citation module submits from, so its wording has
+   to be readable rather than squeezed beside the box. */
+.gw-check {
+  display: flex; gap: 9px; align-items: flex-start;
+  margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line);
+  font-size: 12px; color: var(--muted); line-height: 1.5; cursor: pointer;
+}
+.gw-check input { margin-top: 2px; flex: 0 0 auto; }
+
 /* Inline "add a client location" — the way out of an empty picker. */
 .gw-addloc { grid-column: 1 / -1; }
 .gw-newloc {

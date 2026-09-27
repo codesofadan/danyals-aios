@@ -635,3 +635,104 @@ def test_web2_drafting_honours_the_operators_image_switch() -> None:
 
     assert _tuning(Settings(_env_file=None, content_images_enabled=False)).max_images == 0
     assert _tuning(Settings(_env_file=None, content_images_enabled=True)).max_images > 0
+
+
+# --------------------------------------------------------------------------- #
+# The graph path (06-AI-STACK.md §2) and its fallback
+# --------------------------------------------------------------------------- #
+def test_the_graph_path_is_off_unless_an_operator_turns_it_on(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``ai_graphs_enabled`` defaults False, so every existing deployment keeps drafting
+    through the linear pipeline until someone decides otherwise. A new execution engine
+    that switched itself on at upgrade time would be a change nobody chose."""
+    store = FakeOffpageStore(web2={"w2-1": _draft_row()})
+    monkeypatch.setattr(wk, "_writer_for", lambda s: (FakeWriter(), "m"))
+    monkeypatch.setattr(wk, "_gate", lambda: _gate(FakeCostStore()))
+    called: list[str] = []
+    monkeypatch.setattr(
+        wk, "_web2_write_via_graph", lambda *a, **k: called.append("graph") or None
+    )
+
+    assert _settings().ai_graphs_enabled is False
+    wk.execute_web2_write(store, _settings(), "w2-1")  # type: ignore[arg-type]
+    assert called == [], "the graph must not be consulted while the flag is off"
+
+
+def test_a_graph_that_cannot_run_falls_back_and_still_drafts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The fallback is load-bearing, not a formality.
+
+    The graph needs an optional extra installed AND migration 0148 applied. A deployment
+    missing either must keep drafting: a campaign that stalls because a package is absent
+    is a worse failure than one that drafts without checkpoints.
+    """
+    store = FakeOffpageStore(web2={"w2-1": _draft_row()})
+    monkeypatch.setattr(wk, "_writer_for", lambda s: (FakeWriter(), "m"))
+    monkeypatch.setattr(wk, "_gate", lambda: _gate(FakeCostStore()))
+    monkeypatch.setattr(wk, "_web2_write_via_graph", lambda *a, **k: None)
+
+    settings = Settings(_env_file=None, ai_graphs_enabled=True)  # type: ignore[call-arg]
+    outcome = wk.execute_web2_write(store, settings, "w2-1")  # type: ignore[arg-type]
+
+    assert outcome.state == "needs_review"
+    assert store.web2["w2-1"]["status"] == "needs_review"
+    assert store.web2["w2-1"]["body_md"], "the linear path must still produce the article"
+
+
+def test_a_graph_failure_never_re_raises_out_of_the_worker(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``task_acks_late`` makes a raised exception a REDELIVERY, which re-runs the paid
+    drafting stage. So an unexpected graph fault degrades to the linear path; the
+    property is drafted once, and the fault is in the log rather than on the bill."""
+    store = FakeOffpageStore(web2={"w2-1": _draft_row()})
+    monkeypatch.setattr(wk, "_writer_for", lambda s: (FakeWriter(), "m"))
+    monkeypatch.setattr(wk, "_gate", lambda: _gate(FakeCostStore()))
+
+    def explode(*_a: Any, **_k: Any) -> Any:
+        raise RuntimeError("checkpointer exploded")
+
+    monkeypatch.setattr(
+        wk.ServiceOffpageStore, "web2_platform_row", lambda self, p: None, raising=False
+    )
+    monkeypatch.setattr("app.modules.web2.graphs.campaign_content.draft_property", explode)
+
+    settings = Settings(_env_file=None, ai_graphs_enabled=True)  # type: ignore[call-arg]
+    outcome = wk.execute_web2_write(store, settings, "w2-1")  # type: ignore[arg-type]
+
+    assert outcome.state == "needs_review", "the fallback drafted it"
+
+
+@pytest.mark.parametrize(
+    ("state", "parked", "expected_state", "expected_reason"),
+    [
+        ({"status": "needs_review", "publishable": True}, True, "needs_review", "drafted"),
+        (
+            {"status": "needs_review", "publishable": False, "needs": ["a price"]},
+            True, "needs_review", "drafted_with_gaps",
+        ),
+        ({"status": "unchanged", "error": "status=published"}, False, "unchanged", "status=published"),
+        (
+            {"status": "blocked", "error": "spend_blocked:blocked_cap"},
+            False, "blocked", "spend_blocked:blocked_cap",
+        ),
+        ({"status": "error", "error": "not found"}, False, "error", "not found"),
+    ],
+)
+def test_graph_state_translates_into_the_pipelines_own_outcome_vocabulary(
+    state: dict[str, Any], parked: bool, expected_state: str, expected_reason: str
+) -> None:
+    """Nothing downstream may be able to tell which path drafted a property.
+
+    PARKED IS SUCCESS: the graph stopping at its approval interrupt is the drafting stage
+    completing, and it maps to the same ``needs_review`` the linear path reaches. A run
+    that did not park ended early and already carries the reason, so it is passed through
+    rather than re-derived - two places deciding what "blocked" means is how the two
+    paths would start disagreeing.
+    """
+    outcome = wk._outcome_from_graph("w2-1", state, parked=parked)
+    assert outcome.state == expected_state
+    assert outcome.reason == expected_reason
+    assert outcome.stage == "write"

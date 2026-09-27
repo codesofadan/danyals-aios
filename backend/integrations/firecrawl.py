@@ -34,6 +34,7 @@ The whole call is NON-RAISING: any transport / HTTP / parse failure degrades to 
 
 from __future__ import annotations
 
+import asyncio
 import base64
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
@@ -60,6 +61,31 @@ _SCRAPE_PATH = "/v1/scrape"
 _SCRAPE_TIMEOUT = 60.0
 _SCREENSHOT_TIMEOUT = 20.0
 _MAX_SCREENSHOT_BYTES = 4_000_000  # decoded PNG bytes
+
+#: How many times a 429 is retried before the capture degrades, and how long to wait.
+#: Small on purpose: a design capture sits inside a request an operator is waiting on, so
+#: the ceiling on total added latency is a few seconds, not a resilient-queue's minutes.
+_RATE_LIMIT_ATTEMPTS = 3
+_RATE_LIMIT_BACKOFF = 2.0      # seconds, doubled per attempt
+_RATE_LIMIT_MAX_SLEEP = 15.0   # never wait longer than this on one attempt
+
+#: Anthropic's HARD per-dimension limit for an image block. Exceed it on either axis and
+#: the Messages API answers `400 invalid_request_error: At least one of the image
+#: dimensions exceed max allowed size: 8000 pixels` - it does not downscale for you.
+#:
+#: MEASURED DEFECT (2026-09-25). The byte cap above was the only guard, and it does not
+#: catch this: a real capture of https://app.smarthealth.ae came back 1.3 MB - comfortably
+#: inside the 4 MB cap - and over 8000 px TALL, because `screenshot@fullPage` renders the
+#: entire page top-to-bottom. The vision call 400'd, `extract_site_design` caught it as
+#: `analysis_failed`, and the whole design capture degraded with NOTHING saved. Every
+#: reasonably long page hit this, which is most real sites.
+_MAX_SCREENSHOT_EDGE = 8000
+
+#: PNG magic + the fixed offsets of IHDR's width/height (big-endian uint32 each).
+#: Read from the header rather than with an imaging library on purpose: the backend
+#: declares no image dependency, and 24 bytes of a documented file format is a smaller
+#: commitment than adding Pillow to read two integers.
+_PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
 
 
 @dataclass(frozen=True)
@@ -105,18 +131,90 @@ async def firecrawl_scrape(
     the size cap simply comes back ``None`` while the markdown is still returned - a partial
     success, not a degrade.
     """
-    formats: list[str] = ["markdown"] + (["screenshot@fullPage"] if want_screenshot else [])
+    page = await _scrape_once(
+        http, api_key=api_key, base_url=base_url, url=url,
+        want_screenshot=want_screenshot, full_page=True,
+    )
+    # A FULL-PAGE capture of a long page routinely exceeds the vision API's 8000 px
+    # per-dimension limit, and `_fetch_png_b64` drops it for that reason. Retrying with
+    # the VIEWPORT format keeps vision rather than silently falling back to text-only:
+    # above the fold is where the palette, the type scale, the button and card styling
+    # actually live, so a clipped screenshot is far better evidence than none. Only the
+    # tall pages pay the extra render.
+    if want_screenshot and page is not None and page.screenshot_b64 is None:
+        logger.info("firecrawl_screenshot_retry", reason="fullpage_unusable", url_host=_host(url))
+        viewport = await _scrape_once(
+            http, api_key=api_key, base_url=base_url, url=url,
+            want_screenshot=True, full_page=False,
+        )
+        if viewport is not None and viewport.screenshot_b64 is not None:
+            # Keep the FULL-PAGE markdown (it covers the whole document) and take only
+            # the usable screenshot from the retry.
+            return FirecrawlPage(
+                markdown=page.markdown or viewport.markdown,
+                screenshot_b64=viewport.screenshot_b64,
+            )
+    return page
+
+
+def _host(url: str) -> str:
+    """The URL's host, for logs that must never echo a full scraped URL."""
+    from urllib.parse import urlsplit
+
+    try:
+        return (urlsplit(url).hostname or "").lower()
+    except ValueError:
+        return ""
+
+
+async def _scrape_once(
+    http: httpx.AsyncClient,
+    *,
+    api_key: str,
+    base_url: str,
+    url: str,
+    want_screenshot: bool,
+    full_page: bool,
+) -> FirecrawlPage | None:
+    """One Firecrawl scrape. ``full_page`` picks the screenshot variant."""
+    shot = "screenshot@fullPage" if full_page else "screenshot"
+    formats: list[str] = ["markdown"] + ([shot] if want_screenshot else [])
     endpoint = f"{base_url.rstrip('/')}{_SCRAPE_PATH}"
     body: dict[str, Any] = {"url": url, "formats": formats, "onlyMainContent": False}
-    try:
-        resp = await http.post(
-            endpoint,
-            headers={"Authorization": f"Bearer {api_key}"},
-            json=body,
-            timeout=_SCRAPE_TIMEOUT,
-        )
-    except Exception:  # transport error: degrade to the fallback fetcher (never crash)
-        logger.info("firecrawl_degraded", reason="transport_error")
+    resp = None
+    # RATE LIMITING IS TRANSIENT, AND THIS SEAM USED TO TREAT IT AS FATAL.
+    #
+    # A 429 fell into the generic non-200 branch below: log the status, return None,
+    # degrade to the plain fetcher. For ONE operator-triggered capture that is barely
+    # visible. MEASURED on a 45-page sweep (2026-09-25): 36 of 45 captures degraded on
+    # 429, so a bulk design capture - which is exactly what an agency onboarding a client
+    # runs - would have silently produced text-only profiles for most of the batch and
+    # reported nothing wrong. The oversize retry above makes it worse by design: a tall
+    # page costs two calls, so the batch hits the limit sooner.
+    #
+    # Bounded, and honest about the wait: `Retry-After` is obeyed when the provider sends
+    # it, otherwise a short exponential backoff. Exhausting the attempts still degrades
+    # rather than raising, which is this module's contract.
+    for attempt in range(_RATE_LIMIT_ATTEMPTS):
+        try:
+            resp = await http.post(
+                endpoint,
+                headers={"Authorization": f"Bearer {api_key}"},
+                json=body,
+                timeout=_SCRAPE_TIMEOUT,
+            )
+        except Exception:  # transport error: degrade to the fallback fetcher (never crash)
+            logger.info("firecrawl_degraded", reason="transport_error")
+            return None
+        if resp.status_code != 429:
+            break
+        if attempt == _RATE_LIMIT_ATTEMPTS - 1:
+            logger.info("firecrawl_degraded", reason="rate_limited", attempts=attempt + 1)
+            return None
+        delay = _retry_after_seconds(resp) or _RATE_LIMIT_BACKOFF * (2**attempt)
+        logger.info("firecrawl_rate_limited", attempt=attempt + 1, sleeping=round(delay, 1))
+        await asyncio.sleep(min(delay, _RATE_LIMIT_MAX_SLEEP))
+    if resp is None:  # pragma: no cover - the loop always assigns or returns
         return None
     if resp.status_code != 200:
         # A key/quota/URL problem: log the STATUS only (never the body - it could echo
@@ -145,6 +243,27 @@ async def firecrawl_scrape(
     return FirecrawlPage(markdown=markdown, screenshot_b64=screenshot_b64)
 
 
+def _retry_after_seconds(resp: Any) -> float | None:
+    """The provider's ``Retry-After`` in seconds, when it sent a usable one.
+
+    Only the delta-seconds form is honoured. The HTTP-date form is legal but rare here,
+    and mis-parsing a date into a multi-hour sleep inside a request an operator is
+    waiting on is worse than falling back to the local backoff.
+    """
+    raw = ""
+    try:
+        raw = str(resp.headers.get("retry-after") or "").strip()
+    except Exception:
+        return None
+    if not raw:
+        return None
+    try:
+        seconds = float(raw)
+    except ValueError:
+        return None
+    return seconds if seconds > 0 else None
+
+
 async def _screenshot_b64(http: httpx.AsyncClient, data: dict[str, Any]) -> str | None:
     """Pull the screenshot out of a scrape result and normalise it to base64 PNG."""
     value = data.get("screenshot")
@@ -164,13 +283,49 @@ async def _normalise_screenshot(http: httpx.AsyncClient, value: str) -> str | No
     return _bounded_b64(value)  # already raw base64
 
 
+def png_dimensions(raw: bytes) -> tuple[int, int] | None:
+    """``(width, height)`` of a PNG read from its IHDR header, or ``None``.
+
+    Stdlib only. A non-PNG or a truncated header returns ``None``, which callers treat
+    as "dimensions unknown" and let through - the byte cap and the API itself are still
+    behind it, so an unreadable header degrades to the previous behaviour rather than
+    dropping a screenshot that might be fine.
+    """
+    if len(raw) < 24 or not raw.startswith(_PNG_MAGIC) or raw[12:16] != b"IHDR":
+        return None
+    return (
+        int.from_bytes(raw[16:20], "big"),
+        int.from_bytes(raw[20:24], "big"),
+    )
+
+
+def screenshot_is_oversized(raw: bytes) -> bool:
+    """Whether this PNG would be REFUSED by the vision API for its dimensions.
+
+    Separate from the byte cap because they catch different failures: bytes bound what
+    the prompt costs, dimensions bound what the API will accept at all. A tall full-page
+    capture routinely passes the first and fails the second.
+    """
+    dims = png_dimensions(raw)
+    return dims is not None and max(dims) > _MAX_SCREENSHOT_EDGE
+
+
 def _bounded_b64(b64: str) -> str | None:
-    """Return the base64 string iff its decoded size is within the cap, else ``None``."""
+    """Return the base64 string iff it is within BOTH caps (bytes and dimensions)."""
     b64 = b64.strip()
     if not b64:
         return None
     approx_bytes = len(b64) * 3 // 4  # base64 -> ~3 bytes per 4 chars
-    return b64 if approx_bytes <= _MAX_SCREENSHOT_BYTES else None
+    if approx_bytes > _MAX_SCREENSHOT_BYTES:
+        return None
+    try:
+        raw = base64.b64decode(b64, validate=False)
+    except Exception:
+        return None
+    if screenshot_is_oversized(raw):
+        logger.info("firecrawl_screenshot_oversized", dimensions=str(png_dimensions(raw)))
+        return None
+    return b64
 
 
 async def _fetch_png_b64(http: httpx.AsyncClient, url: str) -> str | None:
@@ -187,6 +342,10 @@ async def _fetch_png_b64(http: httpx.AsyncClient, url: str) -> str | None:
         return None
     content = resp.content
     if not content or len(content) > _MAX_SCREENSHOT_BYTES:
+        return None
+    if screenshot_is_oversized(content):
+        # The caller retries with the VIEWPORT format rather than losing vision entirely.
+        logger.info("firecrawl_screenshot_oversized", dimensions=str(png_dimensions(content)))
         return None
     return base64.b64encode(content).decode("ascii")
 

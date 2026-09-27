@@ -17,9 +17,19 @@
 // they cannot do it UNKNOWINGLY.
 //
 // THE RULE: a file under components/content/ that dispatches the "approve"
-// review action must render `ApproveGate` — the shared dialog carrying the
-// weighted total, the sub-floor dimensions, and the "Acknowledge & approve"
-// confirm. One file is exempted BY NAME below, for a stated reason.
+// review action must render `ApproveGate` — the shared dialog carrying what the
+// automated checks FOUND in the draft. One file is exempted BY NAME below, for a
+// stated reason.
+//
+// UPDATED 2026-09-26, and the update narrows nothing. The rule used to say "must show
+// the QA SCORE". The operator's decision removed that number from every review surface:
+// its own module declares the threshold and weights uncalibrated against ranking
+// outcomes or a human grade, so it read like a verdict it could not support. The
+// property this guard protects is unchanged and is the one that mattered all along —
+// no approve button may publish to a client's live site with NOTHING in front of the
+// person clicking it. What must be in front of them is now the named problems
+// (`useReviewFlags` / GET /content/jobs/{code}/review-flags), which are deterministic
+// and were never provisional.
 //
 // An earlier draft of this guard also accepted `useContentQa`, on the reasoning
 // that a file fetching the scorecard must be showing it. That was wrong, and
@@ -38,7 +48,7 @@
 //     and portal review buttons are separate flows with their own rules and are
 //     deliberately out of scope here.
 // A green run means "no file matches the known-bad shape", never "every approval
-// in the product shows a score."
+// in the product shows the checks."
 
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
@@ -59,15 +69,15 @@ const RENDERS_GATE = /<ApproveGate\b/;
 const OWN_GATE = new Map<string, string>([
   [
     "ContentJobDetail.tsx",
-    // Its approve ConfirmDialog renders "The QA scorecard reads N / 100 —
-    // passed/FAILED" and sets typeToConfirm="PUBLISH" when the draft failed, so
-    // approving over a failing score costs a typed word. That is a STRONGER
-    // acknowledgement than ApproveGate's single click, not a weaker one.
-    "renders the score in its own ConfirmDialog and requires typing PUBLISH on a failed draft",
+    // Its approve ConfirmDialog lists every flag the checks raised and sets
+    // typeToConfirm="PUBLISH" when one of them is a doctrine floor, so approving over a
+    // real problem costs a typed word. That is a STRONGER acknowledgement than
+    // ApproveGate's single click, not a weaker one.
+    "lists the flags in its own ConfirmDialog and requires typing PUBLISH when a doctrine floor was tripped",
   ],
 ]);
 
-describe("every content approve button shows the QA score", () => {
+describe("every content approve button shows what the checks found", () => {
   const files = readdirSync(DIR).filter(
     (f) => f.endsWith(".tsx") && !f.endsWith(".test.tsx"),
   );
@@ -88,18 +98,18 @@ describe("every content approve button shows the QA score", () => {
       // Still assert the exemption is EARNED, so it cannot rot into a blanket
       // pass if someone later strips the dialog out of an exempted file.
       expect(
-        /typeToConfirm|ConfirmDialog/.test(src) && /\bqaVerdict\b|\buseContentQa\b/.test(src),
+        /typeToConfirm|ConfirmDialog/.test(src) && /\buseReviewFlags\b/.test(src),
         `${file} is exempt because it ${OWN_GATE.get(file)}, but it no longer ` +
-          `shows a score in a confirm. Either restore that or route it through ` +
+          `puts the checks in a confirm. Either restore that or route it through ` +
           `<ApproveGate> and drop the exemption.`,
       ).toBe(true);
       return;
     }
     expect(
       RENDERS_GATE.test(src),
-      `${file} approves content without showing the QA score. Render ` +
-        `<ApproveGate> (see ReviewGate.tsx) so the approver acknowledges the ` +
-        `scorecard they are publishing over.`,
+      `${file} approves content without showing what the checks found. Render ` +
+        `<ApproveGate> (see ReviewGate.tsx) so the approver sees the problems they ` +
+        `are publishing over.`,
     ).toBe(true);
   });
 });

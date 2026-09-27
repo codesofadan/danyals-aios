@@ -404,8 +404,10 @@ def test_audit_worker_emits_audit_deliverable(monkeypatch: pytest.MonkeyPatch) -
     def runner(
         cfg: AuditEngineConfig, *, url: str, tier: str, comprehensive: bool = False,
         depth: str | None = None, max_pages: int | None = None,
-        # Mirrors the _Runner protocol (client name -> Google Places).
+        # Mirrors the _Runner protocol (the client's CANONICAL business name + city
+        # -> Google Places, resolved from client_business_profiles).
         business_name: str | None = None,
+        city: str | None = None,
         is_local_business: bool = False,
     ) -> AuditRunResult:
         return AuditRunResult(ok=True, run_uuid="u-1", artifact_dir="/a", score=88,

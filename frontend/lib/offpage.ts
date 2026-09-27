@@ -535,12 +535,130 @@ export type Web2CampaignInput = {
   //: `proofPoints`, so a campaign that supplies only proof still holds at review.
   uniqueData?: string[];
   testimonials?: string[];
+  /** ONE acknowledgement covering every advisory platform in THIS campaign — the
+   *  operator has read each platform's own rule for this client and chosen it anyway.
+   *  Only needed when `platforms` is named by hand: an auto-spread only ever contains
+   *  platforms the board already called open, so it carries nothing to acknowledge.
+   *
+   *  Unlike the similarity gate's per-property acknowledgement (which must never be
+   *  given in bulk, because each collision is a different fact about a different
+   *  article), a platform advisory is one judgement about one client — so a single
+   *  campaign-level answer is honest. */
+  acknowledgePlatformAdvisories?: boolean;
 };
 
 // The publish PIPELINE's state machine (0028) — distinct from `verified`, which is
 // the live/indexable check on an ALREADY-published row. Drives the plan/approve UI:
 // `needs_review` rows get an Approve/Reject action, everything else is read-only.
 export type Web2PipelineStatus = "draft" | "needs_review" | "publishing" | "published" | "failed" | "rejected";
+
+// --- the ONE client login, and what it actually reaches (0151) ----------------
+
+/** Three states, because there are three genuinely different situations — and a screen
+ *  that collapses them into "Connect" is why a client sits at four platforms forever.
+ *  `one_step` is the only one an operator can clear today; `blocked` needs procurement. */
+export type Web2Readiness = "ready" | "one_step" | "blocked";
+
+export type Web2PlatformConnection = {
+  platform: string;
+  readiness: Web2Readiness;
+  /** The ONE human action that moves `one_step` → `ready`, named precisely. */
+  action: string;
+  reason: string;
+  /** The credential fields the adapter needs and this client has not supplied. */
+  missing: string[];
+};
+
+/** What the client's single username + password can and cannot reach.
+ *
+ *  The headline is a NUMBER, not a yes/no: a password publishes directly on 8 of 53
+ *  adapters, 43 need an OAuth grant or a token no password substitutes for. Calling
+ *  those "connected" because a credential exists promises a capability that is not
+ *  there, and the operator finds out one failed publish at a time. */
+export type Web2ConnectionPlan = {
+  clientId: string;
+  summary: string;
+  readyCount: number;
+  oneStepCount: number;
+  blockedCount: number;
+  platforms: Web2PlatformConnection[];
+  notes: string[];
+};
+
+// --- compose once, publish everywhere ----------------------------------------
+
+/** One platform's VARIANT of the subject — not a copy of it.
+ *
+ *  `shape` is the load-bearing field: a 900-word article and a 29-word note are
+ *  different artifacts, and the same text shortened to 300 characters is a blog post
+ *  cut mid-sentence with the backlink sliced off the end (which is what shipped before
+ *  the content model existed). */
+export type Web2PlannedPost = {
+  platform: string;
+  shape: string;
+  topic: string;
+  angle: string;
+  framework: string;
+  wordTarget: number;
+  anchor: string;
+};
+
+export type Web2BroadcastPlan = {
+  clientId: string;
+  subject: string;
+  summary: string;
+  posts: Web2PlannedPost[];
+  /** Selected platforms that will receive NOTHING, each with its reason. Rendered, never
+   *  dropped: a selection quietly shrunk from twenty to six is found in a report weeks
+   *  later, by which point nobody can say when it happened. */
+  excluded: { platform: string; reason: string }[];
+  notes: string[];
+};
+
+export type Web2BroadcastInput = {
+  clientId: string;
+  subject: string;
+  targetUrl: string;
+  /** Platform names, or the single token `__all__`. An EMPTY list is refused by the
+   *  server rather than read as All — "none chosen" and "everything" are different
+   *  intentions, and a blank must never quietly mean the second. */
+  platforms: string[];
+  anchors?: string[];
+};
+
+/** The sentinel the broadcast route accepts for "every platform that is open". */
+export const WEB2_ALL_PLATFORMS = "__all__";
+
+// --- the placed-link ledger (A8) ---------------------------------------------
+
+/** Every value is SET FROM A FETCH. `unknown` means nobody has successfully looked,
+ *  which is deliberately NOT the same claim as `removed` — one is a gap in our
+ *  monitoring, the other is a fact about their page. */
+export type PlacedLinkState = "live" | "removed" | "nofollowed" | "unknown";
+
+export type PlacedLink = {
+  id: string;
+  client: string;
+  platform: string;
+  pageUrl: string;
+  targetUrl: string;
+  anchor: string;
+  state: PlacedLinkState;
+  rel: string;
+  firstSeenAt: string;
+  lastCheckedAt: string;
+  /** Stamped ONCE, on the transition out of live — so "live in March, lost in June" has
+   *  an answer. The property row's three mutable columns could never give one. */
+  lostAt: string;
+};
+
+export type PlacedLinkBoard = {
+  live: number;
+  removed: number;
+  nofollowed: number;
+  unknown: number;
+  links: PlacedLink[];
+};
 
 // --- Off-page KPIs -----------------------------------------------------------
 export type OffpageKpis = {

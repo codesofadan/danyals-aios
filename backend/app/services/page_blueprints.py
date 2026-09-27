@@ -51,6 +51,14 @@ SECTION_KINDS: frozenset[str] = frozenset(
         "testimonials", "reviews", "gallery", "case_studies", "pricing",
         "about", "team", "service_areas", "map", "faq", "search", "related",
         "conclusion", "cta", "contact", "hours", "lead_form", "body",
+        # SITE CHROME. Canonical because the design extractor legitimately REPORTS it:
+        # a vision pass over a rendered page sees the header, the nav and the footer, and
+        # 4 of 6 page kinds in a live sweep (2026-09-25) emitted them. Leaving them out
+        # of the vocabulary did not stop them arriving - it only meant they arrived as
+        # "unknown", which `section_from_raw` then treated as CONTENT-BEARING, so the
+        # writer was asked to produce body copy for a "header" section and `hero` was no
+        # longer the page's first content block (the doctrine invariant above).
+        "header", "nav", "footer", "breadcrumbs", "sidebar",
     }
 )
 # LAYOUT variants a section can present in (the ``aios-layout-<variant>`` CSS class
@@ -88,6 +96,16 @@ class SectionSpec:
     layout: str = _DEFAULT_LAYOUT
     content: bool = True
     absorb: bool = False
+    #: THE CLIENT DATA THIS SECTION CANNOT BE WRITTEN WITHOUT, or "" when the writer can
+    #: produce it from the brief alone. A slot naming an evidence source the client did
+    #: not supply is DROPPED from the page - never filled with invented prices, invented
+    #: quotes or a generic "transparent pricing tailored to your needs".
+    #:
+    #: This is what makes a FIXED 7-section wireframe safe. Without it the writer meets a
+    #: `pricing` slot with no prices and does what a writer does: makes something up.
+    #: Known sources: testimonials | pricing | reviews | nap | areas | team | stats |
+    #: links | proof.
+    evidence: str = ""
     #: CAPACITY, carried from the measured design (``site_design.BlueprintSection``).
     #: ``max_items`` is how many repeated items the section actually presents - three
     #: pricing cards, four testimonials. 0 means unmeasured, and a generator must then
@@ -112,6 +130,7 @@ class SectionSpec:
             "layout": self.layout,
             "content": self.content,
             "absorb": self.absorb,
+            "evidence": self.evidence,
         }
 
 
@@ -146,141 +165,177 @@ class PageBlueprint:
 # The 7 pre-made templates (the audited default section sequences).
 # --------------------------------------------------------------------------- #
 def _s(
-    kind: str, heading: str, layout: str = _DEFAULT_LAYOUT, *, content: bool = True, absorb: bool = False
+    kind: str,
+    heading: str,
+    layout: str = _DEFAULT_LAYOUT,
+    *,
+    content: bool = True,
+    absorb: bool = False,
+    evidence: str = "",
 ) -> SectionSpec:
-    return SectionSpec(kind=kind, heading=heading, layout=layout, content=content, absorb=absorb)
+    return SectionSpec(
+        kind=kind, heading=heading, layout=layout, content=content, absorb=absorb,
+        evidence=evidence,
+    )
 
 
 TEMPLATES: dict[str, PageBlueprint] = {
-    # 1. SERVICE - a single service. Split hero, trust high, benefits/features grids,
-    # numbered process, proof + testimonials, pricing, FAQ accordion, closing CTA.
+    # EVERY TEMPLATE IS EXACTLY SEVEN SECTIONS (operator's decision, 2026-09-26).
+    #
+    # WHAT THIS REPLACED, and why the replacement is the point. These sequences used to be
+    # 8-12 sections of audited best practice, applied as a WRAPPER over whatever the writer
+    # had already produced as free-form markdown. So a service page had eleven named slots
+    # and a draft with its own invented headings; the wrapper found nothing to put in
+    # "Pricing" or "What clients say", and the published page collapsed to a hero, a wall of
+    # prose and a CTA. Measured on a real client push: 11 slots specified, 3 rendered.
+    #
+    # Seven is a number a writer can be held to and an operator can check at a glance. The
+    # sequence below is now a SPECIFICATION THE WRITER FILLS - one typed payload per slot -
+    # not a shape imposed afterwards on prose that ignored it.
+    #
+    # EVERY TEMPLATE HAS THE SAME SHAPE, deliberately:
+    #   * `hero` first and `cta` last (the doctrine invariant).
+    #   * FIVE slots the writer can always fill from the brief.
+    #   * TWO slots gated on CLIENT EVIDENCE. Supplied -> a seven-section page. Not
+    #     supplied -> those two drop, and the page is five real sections instead of seven
+    #     with two fabrications in it.
+    #
+    # 1. SERVICE - one service, sold: what is included, how it runs, what it answers.
     "service": PageBlueprint(
         "service", "Service page", "service",
         (
             _s("hero", "{primary}", "split"),
-            _s("trust_bar", "Trusted by", "carousel", content=False),
-            _s("intro", "Why {primary} matters"),
-            _s("benefits", "The benefits of choosing {client}", "grid"),
             _s("features", "What's included", "grid"),
             _s("process", "How it works", "numbered-steps"),
-            _s("proof", "Proven results"),
-            _s("testimonials", "What clients say", "carousel"),
-            _s("pricing", "Pricing", "cards"),
             _s("faq", "Frequently asked questions", "accordion"),
+            _s("testimonials", "What clients say", "carousel", evidence="testimonials"),
+            _s("pricing", "Pricing", "cards", evidence="pricing"),
             _s("cta", "Get started with {primary}", "banner"),
         ),
-        notes="Split hero + a repeated CTA (hero + bottom banner); benefits/features as grids.",
+        notes="Split hero; deliverables as a grid; numbered process; proof + price last.",
     ),
-    # 2. LOCATION - one physical location. NAP high, location-specific services +
-    # reviews, team, gallery of the real place, embedded map, sibling areas, FAQ, CTA.
+    # 2. LOCATION - one physical place. The address block and the reviews are what make it
+    # a LOCATION page rather than a service page with a city in it, and both are client
+    # data - so both are gated.
     "location": PageBlueprint(
         "location", "Location page", "local",
         (
             _s("hero", "{primary} in {city}", "split"),
-            _s("contact", "Visit us", "nap", content=False),
-            _s("hours", "Opening hours", "list", content=False),
             _s("intro", "About our {city} location"),
             _s("services", "Services at this location", "grid"),
-            _s("reviews", "Local reviews", "carousel", content=False),
-            _s("team", "Meet the team", "cards", content=False),
-            _s("gallery", "Our {city} location", "grid", content=False),
-            _s("map", "Find us", "map-embed", content=False),
-            _s("service_areas", "Areas we serve nearby", "list", content=False),
             _s("faq", "Frequently asked questions", "accordion"),
+            _s("contact", "Visit us", "nap", content=False, evidence="nap"),
+            _s("reviews", "Local reviews", "carousel", content=False, evidence="reviews"),
             _s("cta", "Book at our {city} location", "banner"),
         ),
-        notes="Location-specific hero + real photos; NAP/hours/map are theme-supplied chrome.",
+        notes="Hero + local intro + services; NAP and reviews render only from real data.",
     ),
-    # 3. SERVICE-AREA - a service across an area (often NO address there): lead with
-    # service + area proof, an explicit covered-areas list, benefits, local reviews.
+    # 3. SERVICE-AREA - a service across an area, usually with no address in it. The
+    # covered-areas list is the page's reason to exist, so it is gated on real areas.
     "service_area": PageBlueprint(
         "service_area", "Service-area page", "local",
         (
             _s("hero", "{primary} in {city}", "split"),
-            _s("trust_bar", "Trusted locally", "carousel", content=False),
             _s("intro", "Serving {city} and the surrounding area"),
             _s("services", "What we offer in {city}", "grid"),
-            _s("service_areas", "Areas we cover", "list"),
-            _s("benefits", "Why choose {client}", "grid"),
-            _s("reviews", "What local customers say", "carousel", content=False),
             _s("process", "How it works", "numbered-steps"),
-            _s("map", "Our coverage area", "map-embed", content=False),
-            _s("faq", "Frequently asked questions", "accordion"),
+            _s("service_areas", "Areas we cover", "list", evidence="areas"),
+            _s("reviews", "What local customers say", "carousel", content=False, evidence="reviews"),
             _s("cta", "Request {primary} in {city}", "banner"),
         ),
-        notes="Lead with service + unique local content, not NAP; explicit covered-areas list.",
+        notes="Service + area content first; the covered-areas list is the page's spine.",
     ),
-    # 4. BLOG - the structural outlier: the middle is a REPEATABLE body container that
-    # absorbs the draft's H2 blocks; sticky ToC on top, proof, FAQ, conclusion, CTA.
+    # 4. BLOG / ARTICLE - the structural outlier: the middle is ONE repeatable body
+    # container that absorbs the article's H2 blocks. The other six stay typed.
     "blog": PageBlueprint(
         "blog", "Blog / article", "blog",
         (
             _s("hero", "{primary}", "stacked"),
             _s("intro", "Introduction"),
-            _s("related", "In this article", "toc", content=False),
             _s("body", "", "stacked", absorb=True),
-            _s("proof", "The evidence"),
             _s("faq", "Frequently asked questions", "accordion"),
             _s("conclusion", "Conclusion"),
+            _s("proof", "The evidence", evidence="proof"),
             _s("cta", "Next steps", "banner"),
         ),
-        notes="Stacked hero (title + featured image); body absorbs the H2 blocks; sticky ToC.",
+        notes="Stacked hero; body absorbs the H2 blocks; evidence block only when cited.",
     ),
-    # 5. FAQ - a Q&A hub: brief intro, a search box + category nav (chrome), the Q&A
-    # accordion body (absorbs the question blocks), links out, a contact fallback CTA.
+    # 5. FAQ - a question hub. The accordion absorbs the Q&A; the rest frames it.
     "faq": PageBlueprint(
         "faq", "FAQ page", "blog",
         (
             _s("hero", "Frequently asked questions", "centered"),
-            _s("search", "Search the FAQ", "stacked", content=False),
-            _s("related", "Browse by topic", "list", content=False),
+            _s("intro", "What this page answers"),
             _s("faq", "Questions & answers", "accordion", absorb=True),
+            _s("services", "What we do", "grid"),
+            _s("proof", "Where these answers come from", evidence="proof"),
+            _s("related", "Related reading", "list", content=False, evidence="links"),
             _s("cta", "Still have questions?", "banner"),
         ),
-        notes="Accordion for 10+ questions (plain list under ~10); simplest questions first.",
+        notes="Accordion body; a services grid so the page sells as well as answers.",
     ),
-    # 6. LOCAL - a local business landing / local homepage: hero with tap-to-call +
-    # rating, services, about, reviews, covered areas, map, one bottom CTA.
+    # 6. LOCAL - a local business landing page, often the site's front door.
     "local": PageBlueprint(
         "local", "Local business landing", "local",
         (
             _s("hero", "{primary} in {city}", "split"),
-            _s("trust_bar", "Rated by locals", "carousel", content=False),
             _s("services", "Our services", "grid"),
             _s("about", "About {client}"),
-            _s("reviews", "Customer reviews", "carousel", content=False),
-            _s("service_areas", "Areas we serve", "list"),
-            _s("map", "Where we are", "map-embed", content=False),
+            _s("faq", "Frequently asked questions", "accordion"),
+            _s("service_areas", "Areas we serve", "list", evidence="areas"),
+            _s("reviews", "Customer reviews", "carousel", content=False, evidence="reviews"),
             _s("cta", "Call {client} today", "banner"),
         ),
-        notes="H1 = service + location + differentiator; primary CTA is tap-to-call.",
+        notes="H1 = service + location + differentiator; the CTA is tap-to-call.",
     ),
-    # 7. HOMEPAGE - a company homepage: hero + logo trust strip, benefits/features
-    # grids, proof + testimonials, about, big-number stat tiles, a repeated CTA.
+    # 7. HOMEPAGE - the company front door: what you do, for whom, proved.
     "homepage": PageBlueprint(
         "homepage", "Homepage", "service",
         (
             _s("hero", "{client}", "split"),
-            _s("trust_bar", "Trusted by", "carousel", content=False),
             _s("benefits", "What you get", "grid"),
-            _s("features", "How it works", "grid"),
-            _s("proof", "Proven results"),
-            _s("testimonials", "What clients say", "carousel"),
+            _s("services", "What we do", "grid"),
+            _s("process", "How it works", "numbered-steps"),
             _s("about", "About {client}"),
-            _s("stats", "By the numbers", "tiles", content=False),
+            _s("testimonials", "What clients say", "carousel", evidence="testimonials"),
             _s("cta", "Get started", "banner"),
         ),
-        notes="One primary CTA repeated top + bottom; logo trust strip under the hero.",
+        notes="One primary CTA repeated top + bottom; proof only where proof exists.",
+    ),
+    # 8. ABOUT - the page a buyer opens before they decide to trust you. Added
+    # 2026-09-26: the operator asked for it by name, and it was the one common page type
+    # with no template at all, so an about page was being built to the SERVICE wireframe.
+    "about": PageBlueprint(
+        "about", "About page", "service",
+        (
+            _s("hero", "About {client}", "split"),
+            _s("intro", "Why we exist"),
+            _s("benefits", "What we stand for", "grid"),
+            _s("process", "How we work", "numbered-steps"),
+            _s("team", "The people behind {client}", "cards", evidence="team"),
+            _s("stats", "By the numbers", "tiles", evidence="stats"),
+            _s("cta", "Work with {client}", "banner"),
+        ),
+        notes="Story first, values as a grid, people and numbers only when they are real.",
     ),
 }
 
 # The job ``page_type`` -> the template it defaults to when the operator picks none.
 # ``gbp_post`` is a single compact GBP card, not a full page, so it maps to nothing
 # (the publish path keeps its existing behaviour).
+#: Which template a page type DEFAULTS to when the operator chose none.
+#:
+#: The four keys a job row can actually carry are the `content_page_type` enum's:
+#: service, blog, local, gbp_post. `about` is here because a page type and a template are
+#: different axes - `about` is a TEMPLATE an operator selects for a company page, and it
+#: is selected on a `service`-typed job. The entry costs nothing and means the mapping is
+#: already right if `about` is ever added to the enum; `gbp_post` is absent on purpose,
+#: because a Google Business post is not a page and has no full-page wireframe.
 _PAGE_TYPE_TEMPLATE: dict[str, str] = {
     "service": "service",
     "local": "local",
     "blog": "blog",
+    "about": "about",
 }
 
 
@@ -288,7 +343,7 @@ _PAGE_TYPE_TEMPLATE: dict[str, str] = {
 # Public accessors.
 # --------------------------------------------------------------------------- #
 def template_names() -> list[str]:
-    """The 7 canonical template keys, in a stable order."""
+    """The canonical template keys, in a stable order."""
     return list(TEMPLATES.keys())
 
 
@@ -299,10 +354,26 @@ def get_template(name: str | None) -> PageBlueprint | None:
     return TEMPLATES.get(name)
 
 
+def _normalize_page_type(page_type: str) -> str:
+    """A page type reduced to its comparison key: lowercased, trimmed, hyphens as
+    underscores. So ``"Service-Area"``, ``"service_area"`` and ``" SERVICE AREA "``
+    are one key - which matters because these values arrive from a job row, a brand
+    kit's JSON and an operator's wizard, and those three have never agreed on case."""
+    return str(page_type or "").strip().lower().replace("-", "_").replace(" ", "_")
+
+
 def template_for_page_type(page_type: str) -> PageBlueprint | None:
     """The DEFAULT template for a job page type (service->service, local->local,
-    blog->blog); ``None`` for a type with no full-page template (e.g. gbp_post)."""
-    return TEMPLATES.get(_PAGE_TYPE_TEMPLATE.get(page_type, ""))
+    blog->blog); ``None`` for a type with no full-page template (e.g. gbp_post).
+
+    Also accepts a template key directly (``faq``, ``homepage``, ``service_area``), so
+    a captured page type that is not one of the four JOB types still resolves to its
+    audited sequence rather than to nothing."""
+    key = _normalize_page_type(page_type)
+    mapped = _PAGE_TYPE_TEMPLATE.get(key, "")
+    if mapped:
+        return TEMPLATES.get(mapped)
+    return TEMPLATES.get(key)
 
 
 # --------------------------------------------------------------------------- #
@@ -348,8 +419,22 @@ _KIND_DEFAULT_LAYOUT: dict[str, str] = {
 # Section kinds that are CHROME by default (theme / plugin supplied, no generated copy)
 # when a raw section omits an explicit ``content`` flag.
 _CHROME_KINDS: frozenset[str] = frozenset(
-    {"trust_bar", "map", "gallery", "search", "hours", "contact", "lead_form", "stats", "reviews"}
+    {
+        "trust_bar", "map", "gallery", "search", "hours", "contact", "lead_form",
+        "stats", "reviews",
+        # The site's own furniture. Theme- and plugin-supplied on every page, so a
+        # generated page must never be asked to write it. `app.modules.site_builder`
+        # reached the same conclusion independently with its own `_CHROME_ROLES =
+        # {"header", "nav", "footer"}`; that set now imports from here so the two
+        # cannot disagree about what chrome is.
+        "header", "nav", "footer", "breadcrumbs", "sidebar",
+    }
 )
+
+#: The subset of :data:`_CHROME_KINDS` that is the SITE's furniture rather than a
+#: content block the theme happens to own. Exported because `site_builder` filters on
+#: exactly this when it builds a DesignIR from a measured capture.
+CHROME_ROLES: frozenset[str] = frozenset({"header", "nav", "footer", "breadcrumbs", "sidebar"})
 
 
 
@@ -425,6 +510,59 @@ def sections_from_raw(raw: Any) -> list[SectionSpec]:
 # --------------------------------------------------------------------------- #
 # The resolver: pick the effective blueprint for a job (precedence-ordered).
 # --------------------------------------------------------------------------- #
+#: Below this many sections, a "measured" blueprint is read as a FAILED CAPTURE rather
+#: than as a design, and the audited template is used instead.
+#:
+#: MEASURED ON A REAL CLIENT: hudamoji.pk's homepage came back as exactly two sections -
+#: a hero and a CTA - because the analyzer read a page builder's outer wrapper instead of
+#: the sections inside it. No real homepage is a hero followed by a contact form, so that
+#: is not a design system; it is a measurement that failed and said nothing about failing.
+#: Trusting it would have published two-section pages for a client whose template calls
+#: for seven, and the operator's only clue would be the page itself.
+#:
+#: Four is the floor because three is a shape a real page can genuinely have (hero, body,
+#: CTA - a thin landing page), and refusing a design a client actually has is worse than
+#: accepting a poor one. The bar is "could this plausibly be a page", not "is this good".
+_MIN_MEASURED_SECTIONS = 4
+
+
+def _plausible(sections: list[SectionSpec]) -> list[SectionSpec]:
+    """The measurement, or ``[]`` when it is too thin to be a real page (see above)."""
+    return sections if len(sections) >= _MIN_MEASURED_SECTIONS else []
+
+
+def blueprint_for_page_type(layout: dict[str, Any], page_type: str) -> list[SectionSpec]:
+    """The measured sections for THIS page type, from a profile's ``layout``, or ``[]``.
+
+    Reads the per-page-type map (``layout.blueprints``, migration 0154) first, then
+    falls back to the singular ``layout.blueprint`` ONLY when the profile says that
+    capture was of this same page type (``layout.source_page_type``). A homepage
+    measurement is evidence about homepages, and treating it as evidence about blog
+    posts is the defect this function exists to prevent.
+
+    A measurement too thin to be a real page is discarded (see
+    :data:`_MIN_MEASURED_SECTIONS`) so the caller falls through to the audited template -
+    a failed capture must not outrank a template that was designed.
+
+    Matching is on the normalised page type, so ``"Service"``, ``"service"`` and
+    ``" SERVICE "`` are one key.
+    """
+    wanted = _normalize_page_type(page_type)
+    if not wanted:
+        return []
+    by_type = _as_dict(layout.get("blueprints"))
+    for key, value in by_type.items():
+        if _normalize_page_type(str(key)) == wanted:
+            sections = _plausible(sections_from_raw(value))
+            if sections:
+                return sections
+    # The singular blueprint counts for its OWN type only. A capture that never said
+    # what it measured cannot claim to be this page type.
+    if _normalize_page_type(str(layout.get("source_page_type") or "")) == wanted:
+        return _plausible(sections_from_raw(layout.get("blueprint")))
+    return []
+
+
 def resolve_blueprint(
     *,
     design_profile: dict[str, Any] | None,
@@ -433,43 +571,60 @@ def resolve_blueprint(
 ) -> list[SectionSpec]:
     """The ONE effective ordered blueprint a job's page is built to, by precedence:
 
-    1. the ANALYZED profile's rich ``layout.blueprint`` - the CLIENT'S OWN measured
-       sections, in their own order, with their own capacities;
+    1. the client's MEASURED sections FOR THIS PAGE TYPE (``layout.blueprints[type]``,
+       or the singular ``layout.blueprint`` when the capture was of this type);
     2. else an explicitly chosen TEMPLATE (one of the 7);
-    3. else the analyzed profile's ``layout.section_order`` (names only -> default layouts);
-    4. else the DEFAULT template for the page type (service/local/blog);
-    5. else ``[]`` - nothing to shape by (the publish path keeps its plain behaviour).
+    3. else the DEFAULT template for this page type (service / local / blog / ...);
+    4. else the client's measured sections for ANY page type - better than nothing
+       when the page type has no template at all;
+    5. else the analyzed ``layout.section_order`` (names only -> default layouts);
+    6. else ``[]`` - nothing to shape by (the publish path keeps its plain behaviour).
 
-    THE MEASURED DESIGN WINS (changed 2026-09-17, owner decision). It used to be the
-    other way around: a chosen template outranked the analyzed blueprint. That reads
-    as reasonable - "the operator picked it, honour it" - but the operator was not
-    picking. The content flow sends a template on EVERY launch
-    (``StepLaunch.tsx``), so the "explicit choice" tier matched every single job and
-    the client's captured design never once shaped a page. A design system stored
-    against a client is now the thing pages are built to; the template is what we
-    fall back to when we have not measured them yet.
+    THE MEASURED DESIGN WINS - FOR THE PAGE TYPE IT WAS MEASURED ON. Tier 1 used to
+    be "the analyzed blueprint", full stop, which is why this needed fixing: a client
+    whose captured page was their homepage had the homepage's section sequence used as
+    the structure of their blog articles and location pages. The sequence is the one
+    part of a design system that is page-type-specific - hero, trust bar, services
+    grid, stats, CTA is a correct homepage and a wrong blog post - so a measurement of
+    one type does not transfer to another. Tiers 2 and 3 now sit above a foreign-type
+    measurement precisely because the audited template for "blog" beats this client's
+    homepage at being a blog post.
 
-    A template still wins over a *thin* profile (tier 3): a bare
-    ``section_order`` carries names with no capacities, which is weaker grounding
-    than a real template.
+    WHAT DID NOT CHANGE, and must not: the rest of the design system - palette,
+    typography, components, spacing - is NOT page-type-specific and is applied at
+    every tier by the publish path, so pages still look like one developer built them
+    whichever tier supplied their structure. And the 2026-09-17 owner decision that
+    put measurement above the wizard's always-sent template still holds for the type
+    actually measured, which is the case it was about.
 
     Returns a list of :class:`SectionSpec` (possibly empty). Degrade-safe: a
     malformed / unknown input at any tier falls through to the next.
     """
     profile = _as_dict(design_profile)
     layout = _as_dict(profile.get("layout"))
-    analyzed = sections_from_raw(layout.get("blueprint"))
-    if analyzed:
-        return analyzed
+
+    measured = blueprint_for_page_type(layout, page_type)
+    if measured:
+        return measured
     chosen = get_template(template)
     if chosen is not None:
         return list(chosen.sections)
-    from_order = sections_from_raw(layout.get("section_order"))
-    if from_order:
-        return from_order
     default = template_for_page_type(page_type)
     if default is not None:
         return list(default.sections)
+    # No template exists for this page type (an uncatalogued type like `gbp_post`).
+    # Here a foreign-type measurement genuinely is the best available grounding - it
+    # is at least this client's own site - so it is used rather than nothing.
+    any_measured = sections_from_raw(layout.get("blueprint"))
+    if any_measured:
+        return any_measured
+    for value in _as_dict(layout.get("blueprints")).values():
+        sections = sections_from_raw(value)
+        if sections:
+            return sections
+    from_order = sections_from_raw(layout.get("section_order"))
+    if from_order:
+        return from_order
     return []
 
 

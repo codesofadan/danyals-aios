@@ -379,8 +379,14 @@ def test_factory_selects_real_enrichment_with_keys(monkeypatch: pytest.MonkeyPat
     assert built["serp"] == {"api_key": "sk"}
     # image_host is the decoded-b64 hosting seam; None here (no artifact root configured
     # in these bare settings) -> a b64 image would degrade to skipped, never crash.
+    # quality/image_format/compression are asserted here BECAUSE they are the settings a
+    # deploy most easily leaves behind: the rung governs the bill (adaptive `auto` ran 16x
+    # its own medium on one measured scene) and the format governs page weight (PNG 1.92 MB
+    # vs WebP 0.12 MB for the same tokens). A factory that silently stops forwarding either
+    # is a regression no page would visibly fail on.
     assert built["images"] == {
-        "api_key": "ik", "model": "m1", "size": "1536x1024", "image_host": None
+        "api_key": "ik", "model": "m1", "size": "1536x1024", "image_host": None,
+        "quality": "medium", "image_format": "webp", "compression": 82,
     }
 
 

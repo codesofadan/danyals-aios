@@ -50,6 +50,8 @@ from app.schemas.offpage import (
     FlagToxicRequest,
     NapStatus,
     OffpageKpisResponse,
+    PlacedLinkBoardResponse,
+    PlacedLinkResponse,
     Web2AccountCheckResponse,
     Web2AccountCreateRequest,
     Web2AccountResponse,
@@ -57,6 +59,8 @@ from app.schemas.offpage import (
     Web2AnchorCheckResponse,
     Web2AuthorityTier,
     Web2AuthType,
+    Web2BroadcastPlanResponse,
+    Web2BroadcastRequest,
     Web2CampaignApprovalResponse,
     Web2CampaignEstimateResponse,
     Web2CampaignHold,
@@ -66,15 +70,18 @@ from app.schemas.offpage import (
     Web2CatalogResponse,
     Web2ClientIdentityRequest,
     Web2ClientIdentityResponse,
+    Web2ConnectionPlanResponse,
     Web2DraftResponse,
     Web2Mechanism,
     Web2PlacementCompleteRequest,
     Web2PlacementCompleteResponse,
     Web2PlacementResponse,
+    Web2PlannedPostResponse,
     Web2PlannedPropertyResponse,
     Web2PlanRequest,
     Web2Platform,
     Web2PlatformCatalogResponse,
+    Web2PlatformConnectionResponse,
     Web2PlatformStatusResponse,
     Web2PropertyResponse,
     Web2ProvisionAdvanceRequest,
@@ -802,6 +809,73 @@ async def web2_draft(
     )
 
 
+class _NullGraphCache:
+    """The cost gate's cache seam, doing nothing - a model call's result is never a
+    cacheable value here. Mirrors the null caches every other gate caller defines."""
+
+    def get(self, key: str) -> Any | None:
+        return None
+
+    def set(self, key: str, value: Any) -> None:
+        return None
+
+
+async def _close_web2_graph_thread(web2_id: str, *, approved: bool, note: str) -> None:
+    """Deliver a lead's decision to a ``campaign_content`` graph parked at its interrupt.
+
+    THE ENDPOINT REMAINS AUTHORITATIVE, and deliberately so. Everything that decides
+    whether an approval is legal - RBAC, the live similarity re-check, the 0135 lane
+    routing, retargeting - belongs to the application, not to a reasoning graph, and the
+    row transitions below are the real ones. What this adds is the other half of the
+    human-in-the-loop contract: the graph parked with a full account of how the article
+    was produced, and it should learn what was decided rather than sit checkpointed
+    forever waiting for an answer that arrived somewhere else.
+
+    So: best-effort, never authoritative, and never able to fail an approval.
+
+    * no ``[graph]`` extra, graphs disabled, or no surviving thread -> nothing to do.
+      ``GraphThreadMissing`` is the ORDINARY case on a deployment that drafts linearly,
+      and it is not an error here.
+    * the graph's own writes are idempotent repeats of what the endpoint writes anyway
+      (``publishing`` / ``rejected``), so a double write changes nothing.
+    * a RETARGETED row is the one place the graph's recorded state goes stale: it keeps
+      the platform the article was drafted against, which is the honest record of what
+      was written, while the row carries the platform it will actually publish to.
+    """
+    settings = get_settings()
+    if not getattr(settings, "ai_graphs_enabled", False):
+        return
+    try:
+        from app.db.offpage_repo import ServiceOffpageStore
+        from app.modules.web2.graphs import campaign_content as graph_module
+        from app.platform.ai.graph import GraphThreadMissing, GraphUnavailable
+        from app.platform.ai.router import build_router
+        from app.services.cost_gate import CostGate
+        from app.services.cost_store import PostgresCostStore
+    except ImportError:
+        return
+
+    def _resume() -> None:
+        try:
+            graph_module.resume_with_decision(
+                web2_id, approved=approved, note=note,
+                store=ServiceOffpageStore(),
+                # The resume makes no model call (it re-enters at the interrupt and runs
+                # two bookkeeping nodes), so this gate is never consulted. It is passed
+                # because the router requires one, and a real one is passed rather than a
+                # permissive stub so that a future node which DOES spend is metered by
+                # construction instead of by remembering to change this line.
+                router=build_router(settings, CostGate(PostgresCostStore(), _NullGraphCache())),
+                settings=settings,
+            )
+        except (GraphThreadMissing, GraphUnavailable):
+            return  # the ordinary case when drafting did not run as a graph
+        except Exception:
+            logger.warning("web2_graph_resume_failed", web2_id=web2_id, exc_info=True)
+
+    await asyncio.to_thread(_resume)
+
+
 @router.post("/offpage/web2/{web2_id}/approve", response_model=Web2PropertyResponse)
 async def approve_web2(
     web2_id: str,
@@ -829,6 +903,17 @@ async def approve_web2(
     if body.action == "approve":
         live_code = await asyncio.to_thread(recheck_similarity, web2_id)
         _guard_similarity(row, body, live_code)
+    # Deliver the decision to a parked `campaign_content` graph, if one is waiting.
+    # Best-effort and non-authoritative - see `_close_web2_graph_thread`.
+    # The note the graph records is the ACKNOWLEDGEMENT, because that is the only free
+    # decision the review body carries - `Web2ReviewRequest` has no prose field, and
+    # inventing one here to fill a parameter would be a schema change nobody asked for.
+    await _close_web2_graph_thread(
+        web2_id,
+        approved=body.action == "approve",
+        note="similarity acknowledged" if body.acknowledge_similarity else "",
+    )
+
     if body.action == "reject":
         updated = await asyncio.to_thread(
             repo.update_web2_status, web2_id, {"status": "rejected"}
@@ -1901,6 +1986,25 @@ async def put_web2_client_identity(
             kind="client_access",
         )
 
+    # The SHARED LOGIN (0151), sealed under its own label so rotating it never disturbs
+    # the mailbox credential. Same blank-is-not-clear rule: a form that round-trips an
+    # empty field must not silently drop the one password that unlocks every platform
+    # this client is on - clearing is explicit.
+    pw_label = str(existing.get("web2_password_vault_label") or "")
+    pw_provider = str(existing.get("web2_password_vault_provider") or "")
+    if body.clear_password:
+        pw_label, pw_provider = "", ""
+    elif body.password.strip():
+        pw_label = pw_label or f"{client_id}:web2-login"
+        pw_provider = _IDENTITY_VAULT_PROVIDER
+        await asyncio.to_thread(
+            add_key,
+            provider=pw_provider,
+            label=pw_label,
+            secret=body.password.strip(),
+            kind="client_access",
+        )
+
     def _clean(values: list[str]) -> list[str]:
         return [v.strip() for v in values if isinstance(v, str) and v.strip()]
 
@@ -1922,6 +2026,9 @@ async def put_web2_client_identity(
         imap_user=body.imap_user.strip(),
         vault_provider=provider,
         vault_label=label,
+        username=body.username.strip(),
+        password_vault_provider=pw_provider,
+        password_vault_label=pw_label,
     )
     if row is None:
         raise _CLIENT_NOT_FOUND
@@ -1930,6 +2037,186 @@ async def put_web2_client_identity(
         target=str(row.get("name") or ""), entity_type="client", entity_id=client_id,
     )
     return await asyncio.to_thread(_identity_response, row)
+
+
+@router.post("/offpage/web2/broadcast/plan", response_model=Web2BroadcastPlanResponse)
+async def plan_web2_broadcast(
+    body: Web2BroadcastRequest, repo: OffpageRepoDep, _actor: Lead
+) -> Web2BroadcastPlanResponse:
+    """Compose once, tick the platforms (or All), and see exactly what would go out.
+
+    A PLAN, not a commit. Nothing is drafted, nothing is published and nothing is spent -
+    the operator sees the whole fan-out first, because the alternative is discovering at
+    the review gate that nine of twenty platforms were excluded.
+
+    WHY ONE SUBJECT BECOMES N DIFFERENT POSTS rather than one post sent everywhere: a
+    measured run of the real generator put the same topic on thirty platforms and got
+    thirty BYTE-IDENTICAL articles (body r = 1.000). The similarity gate blocks all
+    thirty - after thirty metered drafting runs have been paid for. So each placement
+    gets its own shape (a 900-word article on Ghost, a 29-word note on Bluesky), its own
+    angle, and a rotated framework. M05 REQ-W2-006: "never spun, never duplicated".
+
+    Excluded platforms are REPORTED with reasons rather than dropped. A selection quietly
+    shrunk from twenty to six is a lie the operator finds in a report weeks later.
+    """
+    from app.modules.web2.broadcast import ALL_PLATFORMS, plan_broadcast
+    from app.services.web2_campaign import CampaignRefusedError
+
+    client = await asyncio.to_thread(repo.client_web2_identity, body.client_id)
+    if client is None:
+        raise _CLIENT_NOT_FOUND
+    client_name = str(client.get("name") or "")
+
+    # The eligibility board already decides which platforms this client may lawfully
+    # publish to - terms, ownership tier, connectivity. Asked here rather than re-derived
+    # so the broadcast cannot be more permissive than the board an operator reads.
+    available, why = await asyncio.to_thread(
+        _auto_platforms, repo, body.client_id, 999
+    )
+    if not available:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=why)
+
+    # Per-client AND house accounts: a house account exists to publish on behalf of
+    # clients, so a planner that only saw client-owned rows refused work the agency can
+    # actually do. Per-client wins a collision (ADR-014: a client-owned identity bounds a
+    # ban to one client; a shared one does not).
+    accounts = await asyncio.to_thread(repo.publishing_accounts_for, body.client_id)
+    selected = body.platforms or []
+    if selected == ["all"] or selected == ["ALL"]:
+        selected = [ALL_PLATFORMS]
+
+    try:
+        plan = await asyncio.to_thread(
+            plan_broadcast,
+            client_id=body.client_id, client_name=client_name, subject=body.subject,
+            target_url=body.target_url, selected=selected, available=available,
+            anchors=body.anchors, accounts=accounts,
+        )
+    except CampaignRefusedError as refused:
+        # A refusal is the operator's answer, not a server fault: it names what they would
+        # have to change (more topics, fewer platforms, a connected account).
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(refused)
+        ) from refused
+
+    return Web2BroadcastPlanResponse(
+        client_id=plan.client_id,
+        subject=plan.subject,
+        summary=plan.summary(),
+        posts=[
+            Web2PlannedPostResponse(
+                platform=post.platform, shape=post.shape, topic=post.topic,
+                angle=post.angle, framework=post.framework,
+                word_target=post.word_target, anchor=post.anchor,
+            )
+            for post in plan.posts
+        ],
+        excluded=[{"platform": name, "reason": reason} for name, reason in plan.excluded],
+        notes=plan.notes,
+    )
+
+
+@router.get("/offpage/placed-links", response_model=PlacedLinkBoardResponse)
+async def list_placed_links(
+    repo: OffpageRepoDep,
+    _actor: ViewReports,
+    page: PageDep,
+    # camelCase on the wire like every other filter in this router. It was `client_id`,
+    # which no dashboard call would ever have matched - the filter would have been
+    # silently ignored and the board would have shown every client's links to an
+    # operator who had narrowed it to one.
+    client_id: Annotated[str | None, Query(alias="clientId")] = None,
+    state: Annotated[str | None, Query()] = None,
+) -> PlacedLinkBoardResponse:
+    """Every outbound link a Web 2.0 property placed, and what became of it (M05 A8).
+
+    THE SURFACE `web2_properties` COULD NOT PROVIDE. Its three link columns record the
+    LATEST look and nothing else - each re-check overwrites the last answer - so "this
+    link was live in March, when did we lose it?" had no answer anywhere in the system.
+    The ledger keeps the transition, and this reads it.
+
+    ORDERED LOST-FIRST, deliberately. A list sorted by date buries the three links that
+    went missing under two hundred that are fine, and the missing ones are the only rows
+    anybody needs to act on. `unknown` sorts with them: "nobody has successfully looked"
+    is a gap in our monitoring, not a clean bill of health, and the two must not read the
+    same on a screen.
+    """
+    counts = await asyncio.to_thread(repo.placed_link_counts, client_id=client_id)
+    rows = await asyncio.to_thread(
+        repo.list_placed_links,
+        client_id=client_id, state=state, limit=page.limit, offset=page.offset,
+    )
+    return PlacedLinkBoardResponse(
+        live=counts.get("live", 0),
+        removed=counts.get("removed", 0),
+        nofollowed=counts.get("nofollowed", 0),
+        unknown=counts.get("unknown", 0),
+        links=[PlacedLinkResponse.from_row(row) for row in rows],
+    )
+
+
+@router.get(
+    "/offpage/web2/clients/{client_id}/connection-plan",
+    response_model=Web2ConnectionPlanResponse,
+)
+async def get_web2_connection_plan(
+    client_id: str, repo: OffpageRepoDep, _actor: ViewReports
+) -> Web2ConnectionPlanResponse:
+    """What this client's ONE login can and cannot reach, platform by platform.
+
+    THE SCREEN THIS REPLACES. A grid of cards that all say "Connect" tells an operator
+    nothing about which of thirty platforms is one click away and which needs a paid API
+    tier - so a client sits at four connected platforms indefinitely and nobody can say
+    why. This answers with a number and, for every platform that is not ready, the ONE
+    action that would make it ready.
+
+    It is also where the system refuses to overclaim. A username and password publishes
+    directly on 8 of the 53 adapters; 43 need an OAuth grant or a personal access token
+    that no password substitutes for. Reporting those as "connected" because a credential
+    exists would promise a capability the system does not have, and the operator would
+    discover it one failed publish at a time.
+
+    Never reads the password. Readiness is computed from the credential SHAPES each
+    adapter requires plus which accounts hold a sealed credential - the vault is not
+    opened to answer a question about whether something is held.
+    """
+    from app.modules.web2.client_credentials import ClientIdentity, build_plan
+    from integrations.web2_publishers import PLATFORM_CREDENTIAL_FIELDS
+
+    row = await asyncio.to_thread(repo.client_web2_identity, client_id)
+    if row is None:
+        raise _CLIENT_NOT_FOUND
+
+    sealed = await asyncio.to_thread(repo.client_sealed_platform_fields, client_id)
+    held = bool(row.get("web2_password_vault_label"))
+    identity = ClientIdentity(
+        client_id=client_id,
+        username=str(row.get("web2_username") or ""),
+        email=str(row.get("web2_contact_email") or ""),
+        # A callable that is never CALLED here - `build_plan` only asks whether a password
+        # exists. Passing a lambda rather than the secret keeps the plan path incapable of
+        # revealing it even by accident.
+        reveal_password=(lambda: "") if held else None,
+    )
+    plan = await asyncio.to_thread(
+        build_plan, sorted(PLATFORM_CREDENTIAL_FIELDS), identity, sealed_by_platform=sealed
+    )
+    return Web2ConnectionPlanResponse(
+        client_id=client_id,
+        summary=plan.summary(),
+        ready_count=len(plan.ready),
+        one_step_count=len(plan.one_step),
+        blocked_count=len(plan.blocked),
+        platforms=[
+            Web2PlatformConnectionResponse(
+                platform=p.platform, readiness=p.readiness, action=p.action,
+                reason=p.reason,
+                missing=[*p.missing_tokens, *p.missing_targets],
+            )
+            for p in plan.plans
+        ],
+        notes=plan.notes,
+    )
 
 
 @router.post(

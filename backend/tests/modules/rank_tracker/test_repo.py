@@ -377,14 +377,23 @@ def test_add_keywords_binds_every_row_and_defers_dedupe_to_the_unique_index(
     )
     query, params = cur.calls[-1]
     text = _as_text(query)
+    # The conflict target INCLUDES hosted_url (migration 0152) and must keep matching the
+    # unique index exactly - an inference target that does not match one raises rather
+    # than skipping, so a drift here fails every insert instead of quietly doing the old
+    # thing. It widened so a PARASITE page and the client's own site can be tracked for
+    # the same term at once (M05 A11): before, the hosted page collided with the client's
+    # existing subscription and was silently dropped, and §6's premise is that parasite
+    # pages target terms the client already tracks.
     assert (
-        "on conflict (client_id, normalized_keyword, engine, device, location, language) "
-        "do nothing" in text
+        "on conflict (client_id, normalized_keyword, engine, device, location, "
+        "language, hosted_url) do nothing" in text
     )
     assert "Roof Repair" not in text  # values bound, not spliced
     # Both the display form and the normalized key are bound, positionally, per row.
+    # 16 params per row now that hosted_url is bound alongside them.
     assert params[:5] == ["cl-1", "Acme", "s-1", "Roof Repair", "roof repair"]
-    assert params[15:20] == ["cl-1", "Acme", "s-1", "Roofer", "roofer"]
+    assert params[16:21] == ["cl-1", "Acme", "s-1", "Roofer", "roofer"]
+    assert params[15] == "", "ordinary tracking carries an EMPTY hosted_url"
 
 
 def test_add_keywords_with_nothing_usable_never_opens_a_connection(

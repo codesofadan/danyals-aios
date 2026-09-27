@@ -211,7 +211,51 @@ class Settings(BaseSettings):
     # subprocess (see apply_provider_env + integrations/audit_engine.py child_env).
     # Model IDs are gateway-specific: a router exposes its OWN catalog, so switching
     # host usually means switching anthropic_model_summary/heavy + AUDIT_AGENT_MODEL too.
+    #
+    # THE ENGINE'S OWN MODEL TIERS, read here so the adapter can hand them to the child.
+    # The engine is a subprocess that looks these up with `os.getenv`, and this file's
+    # values are NOT exported to `os.environ` - so without passing them explicitly the
+    # engine falls back to its own defaults, and its narrative default is an Opus tier.
+    # Blank means "leave the engine's own choice alone", which is the honest no-op.
+    audit_agent_model: str = ""
+    audit_narrative_model: str = ""
     anthropic_base_url: str = ""
+
+    # --- The AI stack (06-AI-STACK.md): model router, LangGraph runtime, LangSmith. ---
+    # Whether the `reasoning` / `judge` tiers REFUSE to run on a backend that cannot do
+    # adaptive thinking or effort control. Default True, which is the doc's rule: a
+    # judge that does not think is a different grader, not a cheaper one, and an eval
+    # calibrated against one says nothing about the other. Turn it off only to run those
+    # tiers knowingly degraded on the OpenAI-compatible proxy (anthropic_base_url) - the
+    # degradation is then recorded on every ModelResult and in every span, never silent.
+    ai_router_strict_tiers: bool = True
+    # The tier -> MODEL map, as `tier=model,tier=model`. Empty keeps 06-AI-STACK.md §3's
+    # table. It exists because that same section says model ids are gateway-specific -
+    # "a router exposes its OWN catalog" - and this deployment's gateway answers a request
+    # for the table's bulk model with `503 no available channel for model
+    # claude-haiku-4-5`. The TIER stays the contract a caller states; which model serves
+    # it is deployment configuration, so changing gateway is not a code change.
+    ai_tier_models: str = ""
+    # LangSmith. BLANK endpoint = tracing entirely off, which is the default: a trace
+    # destination is something an operator chooses, never something that appears because
+    # a package got installed. 06-AI-STACK.md §6 requires SELF-HOSTED by default because
+    # traces carry client page content, NAP data and business descriptions; pointing this
+    # at api.smith.langchain.com is a hosted-SaaS decision that logs a warning naming the
+    # ADR + DPA requirement it triggers.
+    langsmith_endpoint: str = ""
+    langsmith_api_key: SecretStr | None = None
+    langsmith_project: str = "aios"
+    # Redaction is ON by default and independent of the endpoint. With it on, spans carry
+    # the SHAPE of a call (tier, model, tokens, cost, cache hit, prompt hash, latency)
+    # plus content DIGESTS - enough to answer "did these two properties get the same
+    # prompt?" without a syllable of the client's business leaving the process.
+    langsmith_redact_content: bool = True
+    # LangGraph checkpointing rides the EXISTING database_url (§2: same database, same
+    # schema family as jobs). This flag only decides whether graph-shaped execution is
+    # used at all - off keeps every module on its linear path, which is the safe default
+    # while graphs are being rolled out module by module.
+    ai_graphs_enabled: bool = False
+
     # Embedder (Anthropic has no embeddings API, so it is a SEPARATE provider).
     # embeddings_provider selects the impl: "voyage" (default, voyage-3 -> 1024) or
     # "openai" (text-embedding-3-small -> 1536; for a client with an OpenAI key but
@@ -300,7 +344,48 @@ class Settings(BaseSettings):
     # logged / never in a repr). ---
     serper_api_key: SecretStr | None = None  # Serper.dev SERP research
     image_gen_api_key: SecretStr | None = None  # OpenAI-compatible image generation
-    image_gen_model: str = "gpt-image-2"  # image model (provider-configurable)
+    # MEASURED, not assumed (same prompt, same size, six model/quality pairs, real
+    # `usage` token counts off the provider):
+    #
+    #   gpt-image-1-mini     medium  $0.0129  18s   <- SHOWED A FACE, flat clip-art chart
+    #   gpt-image-2          low     $0.0057  14s
+    #   gpt-image-2          medium  $0.0421  32s
+    #   gpt-image-2          high    $0.1656  82s
+    #   gpt-image-2.5-flare  low     $0.0057  11s
+    #   gpt-image-2.5-flare  medium  $0.0113  13s   <- chosen
+    #
+    # flare/medium is visually competitive with gpt-image-2/high at a FIFTEENTH of the
+    # price and a sixth of the latency, and it held the two hard rules of the photo
+    # brief (no face, no legible text) on all four scenes it was validated against.
+    # gpt-image-1-mini is cheaper per token and is NOT a candidate: it broke both rules.
+    image_gen_model: str = "gpt-image-2.5-flare"  # image model (provider-configurable)
+    # The quality rung, sent EXPLICITLY. Left unset the provider bills `auto`, which is
+    # adaptive: it settled on 343 output tokens ($0.0103) for the scene measured above,
+    # but `high` on the same model is 5,488 tokens ($0.1656) - a 16x tail on a bill
+    # nobody chose. An explicit rung is deterministic: flare/medium returned exactly 343
+    # output tokens on every one of the five runs it was measured over.
+    # "" sends no quality field at all, for a provider whose vocabulary differs
+    # (dall-e-3 takes standard|hd, not low|medium|high).
+    image_gen_quality: str = "medium"
+    # The ENCODING, which is a page-speed decision, not a picture-quality one. MEASURED
+    # on the same generation (identical prompt, identical 343 output tokens, so identical
+    # bill):
+    #
+    #   png            1.92 MB
+    #   webp  q=82     0.12 MB   <- chosen; visually indistinguishable at 1536x1024
+    #   jpeg  q=85     0.15 MB
+    #
+    # Sixteen times lighter for the same money. It matters more here than on most
+    # products: a page carries up to five of these, so PNG shipped ~9.6 MB of pictures
+    # into the largest-contentful-paint of a page whose entire purpose is to rank. WebP
+    # is supported by every current browser and by WordPress core since 5.8, and the
+    # plugin's /media route already accepts image/webp.
+    # "" sends no output_format and takes the provider's default (PNG).
+    image_gen_format: str = "webp"
+    # 0 omits output_compression (it is meaningless for PNG, and a provider that does not
+    # know the field 400s on it). 82 is the measured knee: below it the chart lines in a
+    # dashboard photo start to fringe.
+    image_gen_compression: int = 82
     # Generated hero/section images are LANDSCAPE (horizontal rectangle) so they fit the
     # wide blog/page layouts — a square image breaks the layout. gpt-image-2 (like
     # gpt-image-1 before it) supports 1536x1024; env-tune (e.g. "1792x1024" for
@@ -993,9 +1078,13 @@ class Settings(BaseSettings):
     # Google paid APIs billed per call (Places/geocode ~ $0.005/call blended; env-tune
     # per SKU). GSC/GA4/PageSpeed are FREE-tier and priced at $0 by their own settings.
     price_google_per_call: float = 0.005
-    # OpenAI-compatible image generation billed per generated image (gpt-image-1
-    # standard 1024^2 ~ $0.04/image; env-tune per size/quality).
-    price_image_per_image: float = 0.04
+    # OpenAI-compatible image generation billed per generated image. MEASURED off the
+    # provider's own `usage` block for the shipped default (gpt-image-2.5-flare,
+    # quality=medium, 1536x1024): 194 input + 343 output tokens at $5/$30 per MTok =
+    # $0.0113, identical on every run. The old $0.04 was gpt-image-1's 1024^2 price and
+    # over-billed the ledger 3.6x - the client's cost dashboard read high for every
+    # image the platform ever made. Env-tune when changing model/size/quality.
+    price_image_per_image: float = 0.0113
     # Voyage AI embeddings billed per token, priced per 1,000,000 tokens (voyage-3
     # ~ $0.06/MTok). The Embedder seam does not surface the provider token count, so
     # the embed caller approximates tokens from the ACTUAL text length (~4 chars/tok).

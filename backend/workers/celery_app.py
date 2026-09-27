@@ -16,6 +16,7 @@ from celery.signals import worker_init, worker_process_init
 from app.config import apply_provider_env, get_settings, validate_settings
 from app.jobs.celery_task import route_task
 from app.jobs.status import BROKER_VISIBILITY_TIMEOUT
+from app.platform.ai.tracing import configure as configure_tracing
 
 settings = get_settings()
 # Same reason as app/main.py: the Anthropic SDK resolves its host from os.environ, and
@@ -23,6 +24,10 @@ settings = get_settings()
 # heaviest LLM callers (content pipeline, SME questions, audit narrative), so the export
 # has to happen here too - the API's copy does not reach this process.
 apply_provider_env(settings)
+# And the trace destination, for the same reason: worker tasks are the heaviest model
+# callers in the platform (content pipeline, Web 2.0 drafting, audit narrative), so a
+# trace store configured only in the API would miss almost everything worth tracing.
+configure_tracing(settings)
 
 
 @worker_process_init.connect  # type: ignore[untyped-decorator]  # celery's signal decorator is untyped

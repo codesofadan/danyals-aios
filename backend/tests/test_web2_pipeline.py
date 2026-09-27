@@ -529,16 +529,46 @@ def test_run_publish_provider_error_marks_failed_never_raises() -> None:
 
 
 # --------------------------------------------------------------------------- #
-# Medium is draft-only
+# Medium is UNSUPPORTED, not draft-only (M05 REQ-W2-002 / A12)
 # --------------------------------------------------------------------------- #
-def test_medium_publish_is_draft_only_pending() -> None:
+def test_medium_is_refused_before_anything_is_spent() -> None:
+    """A12: "a platform marked `unsupported` has no publishing code path at all".
+
+    THIS TEST PREVIOUSLY ASSERTED THE OPPOSITE, and the behaviour it pinned is what A12
+    forbids. Medium was merely ``DRAFT_ONLY``: the pipeline accepted the platform, ran
+    the paid draft, called a publisher for it, and settled the placement at ``pending``
+    forever. Every part of that is a code path, and the drafting part is a metered one -
+    so a platform whose publishing API was WITHDRAWN was still costing money per
+    placement and producing rows that could never become live.
+
+    The refusal is terminal rather than held, because no amount of waiting makes a
+    withdrawn API return, and it lands BEFORE the cost gate so it cannot spend.
+    """
     store = FakeWeb2Store({"w2-1": _written_row(platform=PLATFORM_MEDIUM)})
+    cost_store = FakeCostStore(mode="api")
+
     outcome = run_publish(
-        store, "w2-1", publisher=FakeWeb2Publisher(), gate=_gate(FakeCostStore(mode="api")), settings=_settings()
+        store, "w2-1", publisher=FakeWeb2Publisher(), gate=_gate(cost_store),
+        settings=_settings(),
     )
-    assert outcome.state == "published"
-    assert outcome.verified is False  # Medium is draft-only, never 'live/verified'
-    assert store.rows["w2-1"]["verified"] == "pending"
+
+    assert outcome.state == "failed"
+    assert outcome.reason.startswith("platform_unsupported:")
+    assert store.rows["w2-1"]["status"] == "failed"
+    assert "no supported publishing path" in store.rows["w2-1"]["error"]
+    assert not cost_store.recorded, "an unsupported platform must never reach the cost log"
+
+
+def test_the_draft_only_concept_survives_even_though_medium_left_it() -> None:
+    """``draft_only`` is still a real platform behaviour and is still honoured per
+    RESULT - it is the SET that is empty, because its only member was reclassified into
+    something stricter. Deleting the concept would mean the next draft-only platform
+    silently reports `verified` on a post nobody pushed live."""
+    from integrations.web2_publishers import DRAFT_ONLY_PLATFORMS
+
+    assert frozenset() == DRAFT_ONLY_PLATFORMS
+    held = Web2PublishResult(post_url="https://x/y", verified=False, draft_only=True)
+    assert verify_live_and_indexable(held, PLATFORM_WORDPRESS)[0] is False
 
 
 def test_verify_live_and_indexable_rules() -> None:
@@ -786,3 +816,80 @@ def test_hashnode_never_declares_the_backlink_target_as_the_canonical_source() -
     assert "post.target_url" not in code, (
         "target_url must not be passed to Hashnode outside the rendered body"
     )
+
+
+# --------------------------------------------------------------------------- #
+# A3: the derived idempotency key
+# --------------------------------------------------------------------------- #
+def test_the_idempotency_key_is_derived_so_a_retry_collides_with_itself() -> None:
+    """M05 A3: "re-running a publish job produces exactly one post on the platform".
+
+    ``run_publish`` guards on ``status == "publishing"`` - a READ then a WRITE with
+    nothing between them, so two workers handed the same redelivered message both read
+    ``publishing`` and both publish. On a social platform that is not a cosmetic
+    duplicate, it is a spam signal.
+
+    A DERIVED key is what closes it: the second attempt computes the same value as the
+    first by construction, and the unique index (migration 0150) refuses it. A random
+    token would have to be threaded through every call site and remembered forever.
+    """
+    row = _draft_row()
+    assert pipeline_mod.idempotency_key(row) == pipeline_mod.idempotency_key(dict(row))
+
+    # A different placement, or the same placement pointed somewhere else, is a different
+    # post and must not be refused as a duplicate of this one.
+    assert pipeline_mod.idempotency_key(_draft_row(id="w2-2")) != pipeline_mod.idempotency_key(row)
+    assert pipeline_mod.idempotency_key(
+        _draft_row(target_url="https://acme.example/other")
+    ) != pipeline_mod.idempotency_key(row)
+
+
+def test_a_published_row_is_stamped_with_its_idempotency_key() -> None:
+    """The key has to reach the DATABASE to do anything - the unique index is what
+    enforces A3, and an index over a column nothing writes enforces nothing."""
+    store = FakeWeb2Store({"w2-1": _written_row()})
+    run_publish(
+        store, "w2-1", publisher=FakeWeb2Publisher(), gate=_gate(FakeCostStore(mode="api")),
+        settings=_settings(),
+    )
+    assert store.rows["w2-1"]["idempotency_key"] == pipeline_mod.idempotency_key(_written_row())
+
+
+def test_recording_a_placed_link_never_fails_a_publish_that_already_happened() -> None:
+    """A8's ledger write is best-effort on purpose.
+
+    By the time it runs the post is LIVE on the platform. Failing the publish over a
+    bookkeeping error would mark the row failed and invite a retry that double-posts - a
+    missing ledger row is recoverable by the next link re-check, an unnecessary republish
+    is not.
+    """
+    class ExplodingStore(FakeWeb2Store):
+        def upsert_placed_link(self, web2_id: str, fields: dict[str, Any]) -> None:
+            raise RuntimeError("ledger is down")
+
+    store = ExplodingStore({"w2-1": _written_row()})
+    outcome = run_publish(
+        store, "w2-1", publisher=FakeWeb2Publisher(), gate=_gate(FakeCostStore(mode="api")),
+        settings=_settings(),
+    )
+    assert outcome.state == "published"
+    assert store.rows["w2-1"]["status"] == "published"
+
+
+def test_a_published_link_is_recorded_in_the_placed_link_ledger() -> None:
+    recorded: list[tuple[str, dict[str, Any]]] = []
+
+    class LedgerStore(FakeWeb2Store):
+        def upsert_placed_link(self, web2_id: str, fields: dict[str, Any]) -> None:
+            recorded.append((web2_id, dict(fields)))
+
+    store = LedgerStore({"w2-1": _written_row()})
+    run_publish(
+        store, "w2-1", publisher=FakeWeb2Publisher(), gate=_gate(FakeCostStore(mode="api")),
+        settings=_settings(),
+    )
+    assert recorded, "the placement's outbound link must reach its own ledger"
+    _, fields = recorded[0]
+    assert fields["target_url"] == "https://acme.example/roof-repair"
+    assert fields["page_url"]
+    assert fields["state"] in {"live", "removed", "nofollowed", "unknown"}

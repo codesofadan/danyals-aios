@@ -25,11 +25,29 @@ API = "/api/v1"
 
 
 class FakeAuditsRepo:
-    def __init__(self, exists: bool = True) -> None:
+    def __init__(
+        self,
+        exists: bool = True,
+        *,
+        previous: dict[str, Any] | None = None,
+        history: list[dict[str, Any]] | None = None,
+        others: dict[str, dict[str, Any]] | None = None,
+    ) -> None:
         self.exists = exists
+        self.previous = previous
+        self.history = history if history is not None else []
+        self.others = others or {}
 
     def get_audit(self, audit_id: str) -> dict[str, Any] | None:
-        return {"id": audit_id, "url": "https://x.test"} if self.exists else None
+        if audit_id in self.others:
+            return self.others[audit_id]
+        return {"id": audit_id, "url": "https://x.test", "depth": "deep"} if self.exists else None
+
+    def previous_audit(self, audit_id: str) -> dict[str, Any] | None:
+        return self.previous
+
+    def audits_of_same_site(self, audit_id: str) -> list[dict[str, Any]]:
+        return list(self.history)
 
 
 class FakeAltitudeRepo:
@@ -100,9 +118,11 @@ def altitudes() -> FakeAltitudeRepo:
 
 @pytest.fixture
 def wire(app: FastAPI, altitudes: FakeAltitudeRepo) -> Callable[..., None]:
-    def _as(role: str = "manager", *, audit_exists: bool = True) -> None:
+    def _as(
+        role: str = "manager", *, audit_exists: bool = True, audits: Any | None = None
+    ) -> None:
         app.dependency_overrides[get_current_user] = lambda: _user(role)
-        app.dependency_overrides[get_audits_repo] = lambda: FakeAuditsRepo(audit_exists)
+        app.dependency_overrides[get_audits_repo] = lambda: audits or FakeAuditsRepo(audit_exists)
         app.dependency_overrides[get_audit_findings_repo] = lambda: altitudes
     return _as
 
@@ -272,3 +292,105 @@ async def test_the_findings_total_honours_the_same_filters_as_the_page(client, w
     assert counted, "the route never asked for a count"
     assert counted[0]["severity"] == "critical"
     assert counted[0]["dimension"] == "technical"
+
+
+# ------------------------------------------------------- SINCE LAST AUDIT
+#
+# "Fixed" is the word a client hears as a promise, so the route's job is to be careful about
+# exactly one claim: a finding that vanished because THIS run did not measure its dimension
+# is `unchecked`, never `fixed`. The pure comparison is covered in test_audit_compare.py;
+# what is asserted here is the ROUTE's behaviour around it - the calm first-audit state, the
+# different-site refusal, and that the withheld score delta carries its reason.
+
+
+class _CompareRepo(FakeAltitudeRepo):
+    """Two runs' findings + coverage, keyed by audit id."""
+
+    def __init__(self, before: Any, after: Any, before_roll: Any, after_roll: Any) -> None:
+        super().__init__()
+        self._by_id = {"aud-0": (before, before_roll), "aud-1": (after, after_roll)}
+
+    def findings(self, audit_id, **kw):  # type: ignore[override]
+        return list(self._by_id.get(audit_id, ([], []))[0])
+
+    def rollups(self, audit_id, *, level=None):  # type: ignore[override]
+        rows = self._by_id.get(audit_id, ([], []))[1]
+        return [r for r in rows if level is None or r["level"] == level]
+
+
+def _finding(check: str, *, pages: int = 1, sev: str = "critical", dim: str = "onpage"):
+    return {
+        "id": f"f-{check}", "check_id": check, "check_name": f"{check} name",
+        "severity": sev, "instance_count": pages, "pages_affected": pages,
+        "dimension": dim, "pillar": "on-page", "subcategory": "x",
+    }
+
+
+def _dim(key: str, *, score: Any, ran: int, basis: str = "b1"):
+    return {
+        "level": "dimension", "key": key, "label": key.title(), "score": score,
+        "checks_ran": ran, "checks_applicable": 100, "basis_hash": basis,
+    }
+
+
+async def test_a_first_audit_says_so_calmly_instead_of_failing(client, wire):
+    wire(audits=FakeAuditsRepo(previous=None, history=[{"id": "aud-1", "created_at": None,
+                                                        "depth": "deep", "score": 61}]))
+    r = await client.get(f"{API}/audits/{AUDIT}/compare")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["available"] is False
+    assert "first completed audit" in body["reason"]
+    # The history is still returned, so the picker can offer runs once there are some.
+    assert body["runs"][0]["id"] == "aud-1"
+
+
+async def test_a_vanished_finding_from_an_unmeasured_dimension_is_never_fixed(
+    client, app, wire
+):
+    """The one outright lie this feature could tell, asserted at the route."""
+    wire(audits=FakeAuditsRepo(previous={"id": "aud-0", "created_at": None, "depth": "deep"}))
+    # AFTER wire(), which sets its own findings-repo override.
+    app.dependency_overrides[get_audit_findings_repo] = lambda: _CompareRepo(
+        before=[_finding("ON-041"), _finding("OFF-002", dim="offpage")],
+        after=[_finding("ON-041")],
+        before_roll=[_dim("onpage", score=70, ran=25), _dim("offpage", score=40, ran=10)],
+        after_roll=[_dim("onpage", score=80, ran=25), _dim("offpage", score=None, ran=0)],
+    )
+    r = await client.get(f"{API}/audits/{AUDIT}/compare")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["available"] is True
+    assert [f["checkId"] for f in body["unchecked"]] == ["OFF-002"]
+    assert body["fixed"] == []
+    assert body["counts"]["fixed"] == 0 and body["counts"]["unchecked"] == 1
+
+
+async def test_comparing_two_different_sites_is_refused_not_rendered(client, wire):
+    wire(audits=FakeAuditsRepo(
+        previous=None,
+        others={"aud-9": {"id": "aud-9", "url": "https://other.test", "depth": "deep"}},
+    ))
+    r = await client.get(f"{API}/audits/{AUDIT}/compare?to=aud-9")
+    assert r.status_code == 409
+    assert "different sites" in r.json()["error"]["message"]
+
+
+async def test_an_unknown_baseline_is_a_404(client, wire):
+    wire(audits=FakeAuditsRepo(previous=None))
+    # `others` is empty and get_audit answers for any id, so ask for the one id the fake
+    # deliberately cannot resolve: a repo with exists=False.
+    wire(audits=FakeAuditsRepo(exists=False))
+    r = await client.get(f"{API}/audits/{AUDIT}/compare?to=aud-missing")
+    assert r.status_code == 404
+
+
+async def test_the_compare_route_is_reads_only_and_open_to_any_report_viewer(client, wire):
+    wire("analyst", audits=FakeAuditsRepo(previous=None))
+    assert (await client.get(f"{API}/audits/{AUDIT}/compare")).status_code == 200
+
+
+async def test_a_client_cannot_reach_it(client, wire):
+    wire("client", audits=FakeAuditsRepo(previous=None))
+    assert (await client.get(f"{API}/audits/{AUDIT}/compare")).status_code == 403
+

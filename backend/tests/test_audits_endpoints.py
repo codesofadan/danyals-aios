@@ -171,6 +171,20 @@ async def test_create_enqueues_queued_row(
         "hasClient",
         # The shareable public report link, present only once a page is PUBLISHED.
         "publicUrl", "publicSlug",
+        # How often the public page has actually been opened, and when it was last
+        # read. A share link that nobody clicked and one a prospect read four times
+        # are different situations, and the difference only exists if it is counted.
+        "publicViews", "publicLastViewed",
+        # When the link stops working. A share that never expires is a permanent
+        # unauthenticated copy of a client's audit, so the expiry belongs beside the
+        # link everywhere the link appears.
+        "publicExpiresAt",
+        # WHETHER THE CRAWL ACTUALLY SAW THE SITE (0160), and what stopped it when it
+        # did not. A run that was blocked at the door still produces a report, and
+        # without this that report reads as a verdict on the site rather than on the
+        # crawl - the failure mode where a 12/100 means "we were served a challenge
+        # page", not "this site is broken".
+        "crawlVerdict", "crawlNote",
     }
     assert body["visibleToClient"] is False  # internal until someone shares it
     # A freshly queued run has no report yet, so there is nothing to share. Null

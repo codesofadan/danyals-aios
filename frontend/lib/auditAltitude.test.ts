@@ -93,6 +93,56 @@ describe("notMeasuredReason — the remedies differ, so the reasons must", () =>
   it("falls back rather than inventing a cause", () => {
     expect(notMeasuredReason({ skip_reasons: {} })).toBe("not run");
   });
+
+  it("reports the DOMINANT reason, not the first one it happens to recognise", () => {
+    // THE REAL SHAPE, off a standard-depth run of mariaazka.com: off-page skipped
+    // 24 checks needing the AI specialists, 7 not dispatched by this command, and 2
+    // on a provider. The old version tested a fixed list in order, recognised none
+    // of these three, and printed "not run" - hiding the one fact that would have
+    // told the operator to re-run at Advanced.
+    const reason = notMeasuredReason({
+      skip_reasons: {
+        ai_assisted_not_run: 24,
+        not_dispatched_by_this_command: 7,
+        needs_provider: 2,
+      },
+    });
+    expect(reason).toMatch(/24 checks/);
+    expect(reason).toMatch(/Advanced/);
+  });
+
+  it("carries the count, because 33 of 71 and 2 of 71 are different conversations", () => {
+    expect(notMeasuredReason({ skip_reasons: { needs_provider: 33 } })).toMatch(/33 checks/);
+    expect(notMeasuredReason({ skip_reasons: { needs_provider: 1 } })).toMatch(/1 check:/);
+  });
+
+  it("names every reason the engine can emit, rather than collapsing to 'not run'", () => {
+    // Each of these is a real constant in the engine's emit.py or its ledger. An
+    // unmapped one degrades to the raw key with underscores stripped, which is still
+    // more use than "not run" - but none of these should need that path.
+    for (const reason of [
+      "source_not_permitted", "needs_provider", "ai_assisted_not_run",
+      "needs_search_console", "not_dispatched_by_this_command",
+      "not_in_selected_dimensions", "owner_decision", "not_yet_built",
+      "analyzer_path_unresolved", "no_finding_emitted",
+    ]) {
+      const text = notMeasuredReason({ skip_reasons: { [reason]: 5 } });
+      expect(text, `${reason} fell through`).not.toContain("_");
+      expect(text).toMatch(/^5 checks: /);
+    }
+  });
+
+  it("is stable between renders when two reasons tie", () => {
+    const a = notMeasuredReason({ skip_reasons: { needs_provider: 4, owner_decision: 4 } });
+    const b = notMeasuredReason({ skip_reasons: { owner_decision: 4, needs_provider: 4 } });
+    expect(a).toBe(b);
+  });
+
+  it("ignores a reason recorded as zero", () => {
+    expect(
+      notMeasuredReason({ skip_reasons: { source_not_permitted: 0, needs_provider: 3 } }),
+    ).toMatch(/provider/);
+  });
 });
 
 describe("scoreTone — an unmeasured dimension is ABSENT, not FAILING", () => {

@@ -14,7 +14,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.util.timefmt import format_runtime, format_when
 
@@ -162,6 +162,16 @@ class AuditPublicPageUpdate(BaseModel):
     """
 
     published: bool
+    #: When this link should stop resolving, or None for no expiry (0161). Opt-in: the
+    #: absence of a value keeps the existing behaviour, which is that a published link
+    #: lives until somebody withdraws it. Past the instant given, the read route answers
+    #: exactly as it does for an unpublished slug.
+    expires_at: datetime | None = Field(default=None, alias="expiresAt")
+    #: Explicitly remove an expiry. `expiresAt: null` on the wire cannot be told apart
+    #: from "not supplied", so clearing a bound needs its own flag.
+    clear_expiry: bool = Field(default=False, alias="clearExpiry")
+
+    model_config = ConfigDict(populate_by_name=True)
 
 
 class AuditPublicPageResponse(BaseModel):
@@ -184,6 +194,11 @@ class AuditPublicPageResponse(BaseModel):
     url: str
     published: bool
     kind: str
+    #: How many times the page has been opened, and when it was last opened (0161). A
+    #: count and a timestamp, nothing that could identify a visitor.
+    views: int = 0
+    last_viewed_at: datetime | None = Field(default=None, serialization_alias="lastViewedAt")
+    expires_at: datetime | None = Field(default=None, serialization_alias="expiresAt")
 
 
 class AuditReingestResponse(BaseModel):
@@ -267,6 +282,21 @@ class AuditResponse(BaseModel):
     # that 404s for the recipient is the failure this field exists to prevent.
     public_url: str | None = Field(default=None, serialization_alias="publicUrl")
     public_slug: str | None = Field(default=None, serialization_alias="publicSlug")
+    # DID WE ACTUALLY GET TO LOOK AT THE SITE (0160)? `ok` | `thin` | `blocked`, or `""`
+    # for a run that was never assessed (it predates the check, or its ingest never ran).
+    #
+    # On the ROW, not only in the report, because this is the one fact that changes what
+    # the whole document means - and the operator decides whether to send it from this
+    # table. A blocked run looks identical to a clean audit of a simple site here:
+    # green, complete, a short page list, honest nulls.
+    crawl_verdict: str = Field(default="", serialization_alias="crawlVerdict")
+    crawl_note: str = Field(default="", serialization_alias="crawlNote")
+    # THE FOLLOW-UP SIGNAL for a shared link (0161). Zero views on a live link is a real
+    # answer ("sent, not opened"), which is why this is 0 rather than null when a page is
+    # published, and why all three are only filled for a page that actually resolves.
+    public_views: int = Field(default=0, serialization_alias="publicViews")
+    public_last_viewed: str | None = Field(default=None, serialization_alias="publicLastViewed")
+    public_expires_at: str | None = Field(default=None, serialization_alias="publicExpiresAt")
 
     @classmethod
     def from_row(cls, row: dict[str, Any]) -> AuditResponse:
@@ -297,6 +327,8 @@ class AuditResponse(BaseModel):
             json_=bool(row.get("json_path")),
             visible_to_client=bool(row.get("visible_to_client")),
             has_client=row.get("client_id") is not None,
+            crawl_verdict=str(row.get("crawl_verdict") or ""),
+            crawl_note=str(row.get("crawl_note") or ""),
         )
 
 
@@ -479,3 +511,49 @@ class AuditEstimateResponse(BaseModel):
     # True when a probe bound stopped the count short, making `measuredPages` a
     # FLOOR on the real total rather than the total.
     size_truncated: bool = Field(default=False, serialization_alias="sizeTruncated")
+
+
+class AuditRefreshRequest(BaseModel):
+    """POST /audits/refresh body: re-audit the selected clients, on purpose.
+
+    WHY THIS EXISTS AS A REQUEST SHAPE. Every schedule on this platform is off by the
+    operator's decision (2026-09-26), and progress reporting needs periodic re-audits - so
+    the recurring job has to be a button somebody presses. A button that spends money per
+    client needs the same care the deep-audit path already takes: a quote first, then the
+    figure echoed back, so nobody starts a roster-wide sweep by mis-clicking.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    client_ids: list[str] = Field(min_length=1, max_length=200, alias="clientIds")
+    #: The depth every run uses. `standard` by default: it buys page speed and the SERP
+    #: read, which is what a month-over-month comparison needs, without the deep run's
+    #: agent fan-out being fired across the whole roster at once.
+    depth: AuditDepth = "standard"
+    #: The total the caller was quoted, echoed back. Required unless the total is zero (a
+    #: free-depth sweep spends nothing, so there is nothing to confirm). Compared with the
+    #: same tolerance the single-run confirmation uses.
+    confirmed_total: float | None = Field(default=None, alias="confirmedTotal", ge=0)
+
+
+class AuditRefreshItem(BaseModel):
+    """What happened for ONE client in a refresh - including the ones that did not run."""
+
+    client_id: str = Field(serialization_alias="clientId")
+    client: str = ""
+    url: str = ""
+    audit_id: str | None = Field(default=None, serialization_alias="auditId")
+    #: queued | skipped
+    outcome: str = "queued"
+    #: Why it was skipped, in the words an operator can act on. Empty when it ran.
+    reason: str = ""
+    estimated_cost: float = Field(default=0.0, serialization_alias="estimatedCost")
+
+
+class AuditRefreshResponse(BaseModel):
+    """The sweep's result: what was queued, what was skipped, and the real total."""
+
+    queued: int = 0
+    skipped: int = 0
+    estimated_total: float = Field(default=0.0, serialization_alias="estimatedTotal")
+    items: list[AuditRefreshItem] = Field(default_factory=list)

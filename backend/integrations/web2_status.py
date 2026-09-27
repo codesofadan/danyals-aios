@@ -25,6 +25,7 @@ from integrations.web2_credentials import vault_provider_for
 from integrations.web2_publishers import (
     DRAFT_ONLY_PLATFORMS,
     PLATFORM_CREDENTIAL_FIELDS,
+    UNSUPPORTED_PLATFORMS,
     WEB2_PLATFORMS,
 )
 
@@ -57,10 +58,28 @@ def web2_platform_status(credential_counts: dict[str, int]) -> list[PlatformStat
     credential exists; Medium is always draft-only (no live publisher to connect)."""
     statuses: list[PlatformStatus] = []
     for platform in sorted(WEB2_PLATFORMS):
-        draft_only = platform in DRAFT_ONLY_PLATFORMS
+        # `draft_only` is the WIRE NAME (and a historical one): what it has always
+        # meant operationally is "this is not a connectable live publishing lane, so
+        # keep it out of `live_count`". An UNSUPPORTED platform satisfies that for a
+        # stronger reason than a draft-only one did, so it sets the same flag.
+        #
+        # It must, because `DRAFT_ONLY_PLATFORMS` is now EMPTY: Medium moved to
+        # `UNSUPPORTED_PLATFORMS` when the pipeline started refusing it outright (A12).
+        # Reading only the old set left the board inviting an operator to "seal a
+        # per-client vault row for Medium to enable publishing" - work that could never
+        # pay off, because `run_publish` refuses the platform before it spends anything.
+        unsupported = platform in UNSUPPORTED_PLATFORMS
+        draft_only = platform in DRAFT_ONLY_PLATFORMS or unsupported
         fields = PLATFORM_CREDENTIAL_FIELDS.get(platform, ())
         count = int(credential_counts.get(platform, 0))
-        if draft_only:
+        if unsupported:
+            reason = (
+                "Not supported: this platform has no usable publishing API, so the "
+                "pipeline refuses it before anything is drafted or spent. There is no "
+                "credential to connect - storing one would not change the outcome."
+            )
+            connected = False
+        elif draft_only:
             reason = (
                 "Draft-only: this platform's publish API is retired, so a post is "
                 "prepared as a draft for a human to publish by hand - there is no live "

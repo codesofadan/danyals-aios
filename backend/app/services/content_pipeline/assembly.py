@@ -27,6 +27,7 @@ from typing import Any, Protocol
 
 from app.config import Settings
 from app.services.content_pipeline.claims import run_claims
+from app.services.content_pipeline.compose import run_compose
 from app.services.content_pipeline.context import PipelineContext, StageResult
 from app.services.content_pipeline.convert import run_convert
 from app.services.content_pipeline.draft import run_draft
@@ -43,6 +44,8 @@ from app.services.content_pipeline.voice import run_voice
 from app.services.content_pipeline.writer import DoctrineWriter
 from app.services.content_schema import Business
 from app.services.cost_gate import CostGate
+from app.services.page_blueprints import resolve_blueprint
+from app.services.page_compose import image_capacity
 from integrations.images import ImageGenerator
 
 StageFn = Callable[[PipelineContext], StageResult]
@@ -123,6 +126,27 @@ def build_page_stages(
             ctx, writer=writer, store=store, model=model
         )
         stages["draft"] = lambda ctx: run_draft(ctx, writer=writer, model=model)
+        # THE TEMPLATED PATH. Bound beside `draft` rather than instead of it because both
+        # shapes are legitimate: an article is prose and a service page is a layout. The
+        # stage ORDER decides which runs (`runner.TEMPLATED_STAGES` vs `PAGE_STAGES`), and
+        # a stage absent from the chosen order is simply never called.
+        #
+        # THE WIREFRAME COMES FROM THE CONTEXT, already resolved. This used to re-resolve
+        # it here from `brief["template"]` with `design_profile=None`, and both halves were
+        # wrong: nothing writes `brief["template"]`, so the operator's chosen template was
+        # never seen and every page fell back to its page type's default; and passing no
+        # design profile meant the client's own measured sections could never win. The
+        # publish path meanwhile resolved it correctly, so the page was COMPOSED to one
+        # wireframe and PUBLISHED as another. One resolve, in the worker, read here.
+        stages["compose"] = lambda ctx: run_compose(
+            ctx,
+            writer,
+            ctx.blueprint or resolve_blueprint(
+                design_profile=None, template=None, page_type=ctx.page_type,
+            ),
+            allowed_contacts=allowed_contacts,
+            vendor_terms=tuple(vendor_terms),
+        )
         stages["convert"] = lambda ctx: run_convert(ctx, writer=writer, model=model)
         stages["voice"] = lambda ctx: run_voice(ctx, writer=writer, model=model)
         stages["grounding"] = lambda ctx: run_grounding(ctx, writer=writer, model=model)
@@ -135,7 +159,16 @@ def build_page_stages(
         # `writer` so the stage can author scenes that are actually ABOUT this page;
         # it is None on a keyless deploy and the stage falls back to the scene bank.
         stages["images"] = lambda ctx: run_images(
-            ctx, generator=images, gate=cost_gate, settings=settings, writer=writer
+            ctx, generator=images, gate=cost_gate, settings=settings, writer=writer,
+            # A TEMPLATED PAGE ASKS FOR THE NUMBER OF PICTURES IT CAN ACTUALLY PLACE.
+            # A service page is hero/grid/steps/accordion/price: exactly one image fits.
+            # The default cap would make five, four of which the renderer has nowhere to
+            # put - which is both a wasted paid call each and, before the placement rule,
+            # four photographs scattered through the copy.
+            max_images=(
+                image_capacity([str(s.get("kind", "")) for s in ctx.sections])
+                if ctx.sections else None
+            ),
         )
 
     # DELIBERATELY OUTSIDE the writer block. Every other stage above is bound only

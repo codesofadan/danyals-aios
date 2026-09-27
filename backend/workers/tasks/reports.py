@@ -124,6 +124,18 @@ def build_monthly_summary(
                 "latest_score": latest,
                 "first_score": metrics.get("audit_first"),
                 "delta": delta,
+                # WHAT WAS FIXED, not only that a number moved (B4). A score delta is a
+                # summary of two measurements; these are the units of work, and they are
+                # what a client actually asks about. Absent (None) until the client has two
+                # completed audits - the report then simply says nothing about change rather
+                # than implying nothing changed.
+                "fixed": metrics.get("audit_fixed"),
+                "new": metrics.get("audit_new"),
+                "still_open": metrics.get("audit_persisting"),
+                # Present in the earlier run and NOT re-checked by the later one. Reported
+                # separately and never folded into `fixed`: that would turn a shallower
+                # depth into a claim of completed work.
+                "not_rechecked": metrics.get("audit_unchecked"),
             },
             "content": {"published_last_30d": content_30d},
             "rankings": {"tracked_keywords": tracked, "in_top_10": top10},
@@ -139,6 +151,15 @@ def build_monthly_summary(
         return f" ({'+' if n >= 0 else ''}{n})"
 
     score_part = f"Score {latest}{_delta_str(delta)}" if latest is not None else "No audit yet"
+    fixed = metrics.get("audit_fixed")
+    if fixed is not None:
+        # The sentence a client reads first. "3 issues fixed" is the thing they are paying
+        # for; the score is how we measure it.
+        new_count = int(metrics.get("audit_new") or 0)
+        score_part = (
+            f"{score_part} - {int(fixed)} fixed"
+            + (f", {new_count} new" if new_count else "")
+        )
     payload["headline"] = score_part
     detail = (
         f"{score_part}, {content_30d} post{'' if content_30d == 1 else 's'} shipped, "

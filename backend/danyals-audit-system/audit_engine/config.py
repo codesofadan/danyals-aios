@@ -12,14 +12,42 @@ import os
 from dataclasses import dataclass, fields
 from pathlib import Path
 
+_ENV_PATH = Path(__file__).resolve().parent.parent / ".env"
+
 try:
     from dotenv import load_dotenv
 
-    _ENV_PATH = Path(__file__).resolve().parent.parent / ".env"
     if _ENV_PATH.exists():
         load_dotenv(_ENV_PATH)
-except ImportError:
-    pass
+except ImportError as _exc:  # pragma: no cover - a misconfigured install, not a branch
+    # THIS USED TO BE `pass`, AND THE SILENCE COST EVERY PAID AUDIT ITS PAID DATA.
+    #
+    # `python-dotenv` was not declared in pyproject, so it was missing from the
+    # engine's venv. The import failed, the except swallowed it, and this file's
+    # `.env` - holding Serper, PageSpeed and Places keys - was never read. `get_keys()`
+    # then returned all-None, `--mode paid` disabled `--serper/--psi/--places` on that
+    # basis, and the run recorded `permitted_cost_classes: ['zero']`.
+    #
+    # The damage lands on the two dimensions that are ENTIRELY billable: off-page
+    # (71 of 71 checks) and local (33 of 36). Both reported "Not measured" on every
+    # audit, with the honest-but-misleading reason "this tier does not run the required
+    # data source" - when the tier did permit it and the loader was simply absent.
+    #
+    # A missing loader NEXT TO A REAL `.env` is a broken install, not a configuration
+    # choice, so it is now loud. It still does not raise: an audit that can run on
+    # crawl-only data is worth more than no audit at all.
+    if _ENV_PATH.exists():
+        import warnings
+
+        warnings.warn(
+            f"python-dotenv is not installed, so {_ENV_PATH} was NOT read. Every API "
+            "key will look absent: --mode paid will silently disable Serper, "
+            "PageSpeed and Places, and the off-page and local dimensions will score "
+            "'Not measured' because every one of their checks is billable. "
+            "Install it: pip install python-dotenv",
+            RuntimeWarning,
+            stacklevel=2,
+        )
 
 
 ROOT = Path(__file__).resolve().parent.parent

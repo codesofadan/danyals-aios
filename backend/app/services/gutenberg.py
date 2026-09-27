@@ -207,14 +207,29 @@ def _grid_section(sec: dict[str, Any], *, kind: str, variant: str) -> str:
     return group_block(blocks, class_name=_kind_classes(kind, variant))
 
 
+def _step_text(step: Any) -> str:
+    """One process step as inline HTML, from EITHER shape the model emits.
+
+    A step is a plain string (the prose-derived shape) or a ``{title, text}`` pair (what
+    the composer returns for a wireframed page). Reading only the string shape turned every
+    composed step into the repr of a dict - ``{'title': 'Book a call', ...}`` printed on a
+    client's page - so both are read here, exactly as the HTML renderer does.
+    """
+    if isinstance(step, dict):
+        title, text = str(step.get("title") or ""), str(step.get("text") or "")
+        if title and text:
+            return f"<strong>{_inline(title)}</strong> {_inline(text)}"
+        return _inline(title or text)
+    return _inline(str(step))
+
+
 def _steps_section(sec: dict[str, Any], *, kind: str, variant: str) -> str:
     heading = str(sec.get("heading") or "")
-    steps = [str(s) for s in _as_dict(sec.get("data")).get("steps") or [] if str(s).strip()]
+    steps = [t for t in (_step_text(s) for s in _as_dict(sec.get("data")).get("steps") or []) if t]
     if not steps:
         return ""
     blocks = [heading_block(_inline(heading), align="center")] if heading else []
-    items = [f"<strong>Step {i}.</strong> {_inline(s)}" for i, s in enumerate(steps, start=1)]
-    blocks.append(list_block(items, ordered=True))
+    blocks.append(list_block(steps, ordered=True))
     return group_block(blocks, class_name=_kind_classes(kind, variant))
 
 
@@ -236,13 +251,28 @@ def _faq_section(sec: dict[str, Any], *, kind: str, variant: str) -> str:
     return group_block(blocks, class_name=_kind_classes(kind, variant))
 
 
+def _quote_html(quote: Any) -> str:
+    """One testimonial as inline HTML, from EITHER shape the model emits.
+
+    A quote is a plain string, or a ``{quote, author, role}`` record. Attribution is part
+    of the testimonial - an unattributed quote is just a sentence in quote marks and a
+    reader discounts it - so when the client supplied a name it renders, and when they did
+    not the quote stands alone rather than inventing a "- Satisfied Customer".
+    """
+    if not isinstance(quote, dict):
+        return _inline(str(quote))
+    who = ", ".join(x for x in (str(quote.get("author") or ""), str(quote.get("role") or "")) if x)
+    body = _inline(str(quote.get("quote") or ""))
+    return f"{body}<cite>{_inline(who)}</cite>" if who else body
+
+
 def _testimonials_section(sec: dict[str, Any], *, kind: str, variant: str) -> str:
     heading = str(sec.get("heading") or "What clients say")
-    quotes = [str(q) for q in _as_dict(sec.get("data")).get("quotes") or [] if str(q).strip()]
+    quotes = [h for h in (_quote_html(q) for q in _as_dict(sec.get("data")).get("quotes") or []) if h]
     if not quotes:
         return ""
     blocks = [heading_block(_inline(heading), align="center")]
-    blocks.extend(quote_block(_inline(q)) for q in quotes)
+    blocks.extend(quote_block(q) for q in quotes)
     return group_block(blocks, class_name=_kind_classes(kind, variant))
 
 

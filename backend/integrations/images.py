@@ -90,8 +90,11 @@ class OpenAIImageGenerator(HttpProviderClient):
         self,
         *,
         api_key: str,
-        model: str = "gpt-image-2",
+        model: str = "gpt-image-2.5-flare",
         size: str = "1024x1024",
+        quality: str = "",
+        image_format: str = "",
+        compression: int = 0,
         timeout: float = 60.0,
         image_host: ImageHost | None = None,
     ) -> None:
@@ -107,10 +110,33 @@ class OpenAIImageGenerator(HttpProviderClient):
         )
         self._model = model
         self._size = size
+        self._quality = quality.strip()
+        self._format = image_format.strip().lower()
+        self._compression = compression
         self._host = image_host
 
     def generate(self, prompt: str, alt: str) -> GeneratedImage:
-        body = {"model": self._model, "prompt": prompt, "n": 1, "size": self._size}
+        body: dict[str, object] = {
+            "model": self._model,
+            "prompt": prompt,
+            "n": 1,
+            "size": self._size,
+        }
+        # Sent only when configured. Omitted, the provider bills `auto` - adaptive, and
+        # on the measured scene 16x cheaper than its own `high` rung, which is exactly
+        # why it cannot be left to chance on a page that makes five of these. Empty
+        # means "this provider's quality vocabulary is not ours" (dall-e-3 wants
+        # standard|hd) and the field is left off rather than guessed at.
+        if self._quality:
+            body["quality"] = self._quality
+        # The encoding is a PAGE-WEIGHT decision and costs nothing: the same generation
+        # returned 1.92 MB as PNG and 0.12 MB as WebP for identical output tokens. Both
+        # fields are omitted when unset - output_compression is meaningless for PNG and
+        # a provider that does not know the field rejects the whole call over it.
+        if self._format:
+            body["output_format"] = self._format
+            if self._compression > 0 and self._format in ("webp", "jpeg"):
+                body["output_compression"] = self._compression
         data = self.request_json("POST", "/v1/images/generations", json_body=body)
         items = data.get("data") or []
         first = items[0] if items and isinstance(items[0], dict) else {}

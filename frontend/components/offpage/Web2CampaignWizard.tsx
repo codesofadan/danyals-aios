@@ -130,209 +130,216 @@ export default function Web2CampaignWizard({ onClose }: { onClose: () => void })
   const quoteWentStale = quotedSignature !== null && !quoteIsCurrent;
 
   return (
-    <div className="modal-scrim" onClick={onClose}>
-      <div className="modal wide" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-h">
-          <div>
-            <div className="modal-t">New Web 2.0 campaign</div>
-            <div className="modal-s">
-              One distinct article per topic, each carrying a single editorial backlink.
-              Nothing publishes until a lead approves.
+    // Self-wrapped in `.tw`: the overlay styles are scoped `.tw .modal-scrim` in
+    // globals.css and THE ADMIN LAYOUT PROVIDES NO `.tw`. Without it the dialog
+    // renders inline at the bottom of the page instead of over it — the operator
+    // clicks a button in a table and the page jumps to a confirmation a screen and
+    // a half below. Every working modal here self-wraps; see CitationCampaignModal.
+    <div className="tw">
+      <div className="modal-scrim" onClick={onClose}>
+        <div className="modal wide" onClick={(e) => e.stopPropagation()}>
+          <div className="modal-h">
+            <div>
+              <div className="modal-t">New Web 2.0 campaign</div>
+              <div className="modal-s">
+                One distinct article per topic, each carrying a single editorial backlink.
+                Nothing publishes until a lead approves.
+              </div>
             </div>
+            <button type="button" className="modal-x" onClick={onClose} aria-label="Close">
+              <span className="material-symbols-rounded">close</span>
+            </button>
           </div>
-          <button type="button" className="modal-x" onClick={onClose} aria-label="Close">
-            <span className="material-symbols-rounded">close</span>
-          </button>
-        </div>
 
-        {created ? (
-          <div className="wiz-body">
-            <div className="op-flash" style={{ position: "static" }}>
-              <span className="material-symbols-rounded">task_alt</span>
-              Campaign created — {created.total} propert{created.total === 1 ? "y" : "ies"} queued.
-              The write worker is drafting; each one parks at &ldquo;needs review&rdquo; for approval.
-            </div>
-            <div className="modal-f">
-              <button className="primary-btn" onClick={onClose}>Done</button>
-            </div>
-          </div>
-        ) : (
-          <div className="wiz-body">
-            <div className="fld">
-              <label>Client</label>
-              <select value={clientId} onChange={(e) => setClientId(e.target.value)}>
-                <option value="">Choose a client…</option>
-                {clientOptions.map((c) => (
-                  <option key={c.id} value={c.id}>{c.cn}</option>
-                ))}
-              </select>
-              <div className="fld-hint">
-                The client decides which platforms are available. Eligibility is computed from
-                the client&rsquo;s declared topical scope (set on the client record; new clients
-                default to the topic-agnostic set) against each platform&rsquo;s own posting rules —
-                a local trade and a software company do not get the same list.
+          {created ? (
+            <div className="wiz-body">
+              <div className="op-flash" style={{ position: "static" }}>
+                <span className="material-symbols-rounded">task_alt</span>
+                Campaign created — {created.total} propert{created.total === 1 ? "y" : "ies"} queued.
+                The write worker is drafting; each one parks at &ldquo;needs review&rdquo; for approval.
+              </div>
+              <div className="modal-f">
+                <button className="primary-btn" onClick={onClose}>Done</button>
               </div>
             </div>
-
-            <div className="fld">
-              <label>Campaign name</label>
-              <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Autumn authority push" />
-              <div className="fld-hint">
-                Your own label for this batch, so it is findable later in the campaign list. It is
-                never shown to the client and never published.
-              </div>
-            </div>
-
-            <div className="fld">
-              <label>Topics — one per line, one article each</label>
-              <textarea
-                rows={6}
-                value={topicsText}
-                onChange={(e) => setTopicsText(e.target.value)}
-                placeholder={"emergency drain unblocking\ngutter cleaning in winter\nwhat a CCTV drain survey shows"}
-              />
-              <div className="fld-hint">
-                <b>{topics.length}</b> article{topics.length === 1 ? "" : "s"}. Each topic becomes its
-                own article — reusing a topic across platforms produces identical articles, which is
-                refused.
-              </div>
-            </div>
-
-            <div className="fld">
-              <label>Anchor text options — one per line</label>
-              <textarea
-                rows={3}
-                value={anchorsText}
-                onChange={(e) => setAnchorsText(e.target.value)}
-                placeholder={"Leeds Drainage\nthe drainage team\nour emergency callout"}
-              />
-              <div className="fld-hint">
-                Rotated across the campaign. Keep them branded and natural — an exact-match
-                commercial anchor repeated across properties is the clearest footprint there is.
-              </div>
-            </div>
-
-            <div className="fld">
-              <label>Target URL</label>
-              <input value={targetUrl} onChange={(e) => setTargetUrl(e.target.value)} placeholder="https://client.example/services" />
-              <div className="fld-hint">
-                The page on the client&rsquo;s own site that every article links to — one editorial
-                link each. Point it at the page you actually want to rank, not the homepage, unless
-                the homepage is the target.
-              </div>
-            </div>
-
-            {/* NO PLATFORM BOARD (2026-09-12, owner instruction).
-                The server spreads the campaign across the platforms actually open for
-                this client, best authority first, API lane before extension lane. That
-                is what an operator picking from a grid of ninety was approximating by
-                hand — and getting wrong, because eligibility is per client and changes
-                as accounts are connected. One article per platform is deliberate: it is
-                the footprint diversification a campaign exists for. */}
-            <div className="fld-hint" style={{ marginBottom: 10 }}>
-              Platforms are chosen for you — the campaign spreads across whatever is open
-              for this client, strongest first, one article per platform. Connecting more
-              accounts under <b>Accounts</b> widens the spread; the quote below tells you
-              exactly which platforms it priced before anything is created.
-            </div>
-
-            {/* The pace SELECTOR is gone by decision (2026-08-29): approved campaigns
-                publish automatically. Offering "drip" while the release tick is not
-                running would have been the worst of both — the operator picks a schedule
-                and the properties then sit unpublished forever. The safety caps still
-                apply; they are what pace it now, not a dropdown.
-
-                UPDATE (owner decision, same day): approved campaigns publish EVERY
-                property immediately. A future `scheduled_for` handed the property to a
-                release tick that nothing in this deployment runs, so it parked the work
-                rather than pacing it - 1 property of N published and N were paid for. */}
-            <div className="fld">
-              <label>Proof &amp; first-hand experience — one per line</label>
-              <textarea rows={3} value={proof} onChange={(e) => setProof(e.target.value)}
-                placeholder={"Cleared 400 blocked drains across Leeds in 2025\n24-hour callout, no weekend surcharge"} />
-              <div className="fld-hint">
-                Without real proof the writer leaves <code>[NEEDS:]</code> gaps and the draft holds at
-                review, un-publishable.
-                {!proof.trim() && (identityQ.data?.proofPoints?.length ?? 0) > 0 && (
-                  <>
-                    {" "}Leave blank and this client&rsquo;s stored brief is used:{" "}
-                    <b>{identityQ.data!.proofPoints.length} point(s)</b> already on file.
-                  </>
-                )}
-              </div>
-            </div>
-
-            <div className="fld">
-              <label>What only this client knows — one per line</label>
-              <textarea rows={3} value={uniqueData} onChange={(e) => setUniqueData(e.target.value)}
-                placeholder={"Across 40 audits, the bottleneck teams named was the real one 3 times in 10\nOur audit returns in ten minutes; the industry norm is two to three weeks"} />
-              <div className="fld-hint">
-                The <b>differentiation</b> angle. Proof above answers &ldquo;why choose them&rdquo;; this
-                answers &ldquo;what makes this different&rdquo; — a separate <code>[NEEDS:]</code> gap,
-                and the one that most often holds a draft at review.
-                {!uniqueData.trim() && (identityQ.data?.uniqueData?.length ?? 0) > 0 && (
-                  <>
-                    {" "}Leave blank and this client&rsquo;s stored brief is used:{" "}
-                    <b>{identityQ.data!.uniqueData.length} on file</b>.
-                  </>
-                )}
-              </div>
-            </div>
-
-            {error && (
-              <div className="op-flash" style={{ position: "static", background: "#fee2e2", color: "#991b1b" }}>
-                <span className="material-symbols-rounded">error</span>
-                {error}
-              </div>
-            )}
-
-            {quoted && (
-              <div className="fld" style={{ borderTop: "1px solid var(--line, #e5e7eb)", paddingTop: 12 }}>
-                <label>Quote</label>
+          ) : (
+            <div className="wiz-body">
+              <div className="fld">
+                <label>Client</label>
+                <select value={clientId} onChange={(e) => setClientId(e.target.value)}>
+                  <option value="">Choose a client…</option>
+                  {clientOptions.map((c) => (
+                    <option key={c.id} value={c.id}>{c.cn}</option>
+                  ))}
+                </select>
                 <div className="fld-hint">
-                  <b>{quoted.count}</b> propert{quoted.count === 1 ? "y" : "ies"} · about{" "}
-                  <b>${quoted.estimatedCostUsd.toFixed(2)}</b> in drafting ·{" "}
-                  {quoted.projectedCompletion
-                    ? <>last one publishes <b>{new Date(quoted.projectedCompletion).toLocaleDateString()}</b></>
-                    : <>all are <b>queued the moment you approve</b> — they go out as fast as the publish worker runs</>}
+                  The client decides which platforms are available. Eligibility is computed from
+                  the client&rsquo;s declared topical scope (set on the client record; new clients
+                  default to the topic-agnostic set) against each platform&rsquo;s own posting rules —
+                  a local trade and a software company do not get the same list.
                 </div>
-                {quoted.notes.length > 0 && (
-                  <ul style={{ margin: "8px 0 0 16px" }} className="fld-hint">
-                    {quoted.notes.map((n, i) => <li key={i} style={{ marginBottom: 4 }}>{n}</li>)}
-                  </ul>
-                )}
               </div>
-            )}
 
-            <div className="modal-f">
-              <button type="button" className="ghost-btn" onClick={quote}
-                disabled={!canQuote || estimate.isPending}>
-                {estimate.isPending ? "Pricing…" : "Get quote"}
-              </button>
-              <button type="button" className="primary-btn" onClick={commit}
-                disabled={!quoted || create.isPending}>
-                {create.isPending ? "Creating…" : `Create ${quoted?.count ?? ""} propert${quoted?.count === 1 ? "y" : "ies"}`}
-              </button>
-            </div>
-            {/* Name the REAL reason Create is disabled. "Get a quote first" is only
-                true when a quote is actually obtainable; when there are no eligible
-                platforms or a required field is empty, it sends the operator to a
-                button that is disabled for a different reason again. */}
-            {!quoted && (
-              <div className="fld-hint" style={{ textAlign: "right" }}>
-                {!canQuote
-                  ? topics.length === 0
-                    ? "Add at least one topic — one per line."
-                    : !targetUrl.trim().startsWith("http")
-                      ? "Add the target URL these properties will link to."
-                      : "Choose a client to continue."
-                  : quoteWentStale
-                    ? "The campaign changed since that quote — get a new one so the price and finish date match what will actually be created."
-                    : "Get a quote first — it shows the cost and the finish date before anything is created."}
+              <div className="fld">
+                <label>Campaign name</label>
+                <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Autumn authority push" />
+                <div className="fld-hint">
+                  Your own label for this batch, so it is findable later in the campaign list. It is
+                  never shown to the client and never published.
+                </div>
               </div>
-            )}
-          </div>
-        )}
+
+              <div className="fld">
+                <label>Topics — one per line, one article each</label>
+                <textarea
+                  rows={6}
+                  value={topicsText}
+                  onChange={(e) => setTopicsText(e.target.value)}
+                  placeholder={"emergency drain unblocking\ngutter cleaning in winter\nwhat a CCTV drain survey shows"}
+                />
+                <div className="fld-hint">
+                  <b>{topics.length}</b> article{topics.length === 1 ? "" : "s"}. Each topic becomes its
+                  own article — reusing a topic across platforms produces identical articles, which is
+                  refused.
+                </div>
+              </div>
+
+              <div className="fld">
+                <label>Anchor text options — one per line</label>
+                <textarea
+                  rows={3}
+                  value={anchorsText}
+                  onChange={(e) => setAnchorsText(e.target.value)}
+                  placeholder={"Leeds Drainage\nthe drainage team\nour emergency callout"}
+                />
+                <div className="fld-hint">
+                  Rotated across the campaign. Keep them branded and natural — an exact-match
+                  commercial anchor repeated across properties is the clearest footprint there is.
+                </div>
+              </div>
+
+              <div className="fld">
+                <label>Target URL</label>
+                <input value={targetUrl} onChange={(e) => setTargetUrl(e.target.value)} placeholder="https://client.example/services" />
+                <div className="fld-hint">
+                  The page on the client&rsquo;s own site that every article links to — one editorial
+                  link each. Point it at the page you actually want to rank, not the homepage, unless
+                  the homepage is the target.
+                </div>
+              </div>
+
+              {/* NO PLATFORM BOARD (2026-09-12, owner instruction).
+                  The server spreads the campaign across the platforms actually open for
+                  this client, best authority first, API lane before extension lane. That
+                  is what an operator picking from a grid of ninety was approximating by
+                  hand — and getting wrong, because eligibility is per client and changes
+                  as accounts are connected. One article per platform is deliberate: it is
+                  the footprint diversification a campaign exists for. */}
+              <div className="fld-hint" style={{ marginBottom: 10 }}>
+                Platforms are chosen for you — the campaign spreads across whatever is open
+                for this client, strongest first, one article per platform. Connecting more
+                accounts under <b>Accounts</b> widens the spread; the quote below tells you
+                exactly which platforms it priced before anything is created.
+              </div>
+
+              {/* The pace SELECTOR is gone by decision (2026-08-29): approved campaigns
+                  publish automatically. Offering "drip" while the release tick is not
+                  running would have been the worst of both — the operator picks a schedule
+                  and the properties then sit unpublished forever. The safety caps still
+                  apply; they are what pace it now, not a dropdown.
+
+                  UPDATE (owner decision, same day): approved campaigns publish EVERY
+                  property immediately. A future `scheduled_for` handed the property to a
+                  release tick that nothing in this deployment runs, so it parked the work
+                  rather than pacing it - 1 property of N published and N were paid for. */}
+              <div className="fld">
+                <label>Proof &amp; first-hand experience — one per line</label>
+                <textarea rows={3} value={proof} onChange={(e) => setProof(e.target.value)}
+                  placeholder={"Cleared 400 blocked drains across Leeds in 2025\n24-hour callout, no weekend surcharge"} />
+                <div className="fld-hint">
+                  Without real proof the writer leaves <code>[NEEDS:]</code> gaps and the draft holds at
+                  review, un-publishable.
+                  {!proof.trim() && (identityQ.data?.proofPoints?.length ?? 0) > 0 && (
+                    <>
+                      {" "}Leave blank and this client&rsquo;s stored brief is used:{" "}
+                      <b>{identityQ.data!.proofPoints.length} point(s)</b> already on file.
+                    </>
+                  )}
+                </div>
+              </div>
+
+              <div className="fld">
+                <label>What only this client knows — one per line</label>
+                <textarea rows={3} value={uniqueData} onChange={(e) => setUniqueData(e.target.value)}
+                  placeholder={"Across 40 audits, the bottleneck teams named was the real one 3 times in 10\nOur audit returns in ten minutes; the industry norm is two to three weeks"} />
+                <div className="fld-hint">
+                  The <b>differentiation</b> angle. Proof above answers &ldquo;why choose them&rdquo;; this
+                  answers &ldquo;what makes this different&rdquo; — a separate <code>[NEEDS:]</code> gap,
+                  and the one that most often holds a draft at review.
+                  {!uniqueData.trim() && (identityQ.data?.uniqueData?.length ?? 0) > 0 && (
+                    <>
+                      {" "}Leave blank and this client&rsquo;s stored brief is used:{" "}
+                      <b>{identityQ.data!.uniqueData.length} on file</b>.
+                    </>
+                  )}
+                </div>
+              </div>
+
+              {error && (
+                <div className="op-flash" style={{ position: "static", background: "#fee2e2", color: "#991b1b" }}>
+                  <span className="material-symbols-rounded">error</span>
+                  {error}
+                </div>
+              )}
+
+              {quoted && (
+                <div className="fld" style={{ borderTop: "1px solid var(--line, #e5e7eb)", paddingTop: 12 }}>
+                  <label>Quote</label>
+                  <div className="fld-hint">
+                    <b>{quoted.count}</b> propert{quoted.count === 1 ? "y" : "ies"} · about{" "}
+                    <b>${quoted.estimatedCostUsd.toFixed(2)}</b> in drafting ·{" "}
+                    {quoted.projectedCompletion
+                      ? <>last one publishes <b>{new Date(quoted.projectedCompletion).toLocaleDateString()}</b></>
+                      : <>all are <b>queued the moment you approve</b> — they go out as fast as the publish worker runs</>}
+                  </div>
+                  {quoted.notes.length > 0 && (
+                    <ul style={{ margin: "8px 0 0 16px" }} className="fld-hint">
+                      {quoted.notes.map((n, i) => <li key={i} style={{ marginBottom: 4 }}>{n}</li>)}
+                    </ul>
+                  )}
+                </div>
+              )}
+
+              <div className="modal-f">
+                <button type="button" className="ghost-btn" onClick={quote}
+                  disabled={!canQuote || estimate.isPending}>
+                  {estimate.isPending ? "Pricing…" : "Get quote"}
+                </button>
+                <button type="button" className="primary-btn" onClick={commit}
+                  disabled={!quoted || create.isPending}>
+                  {create.isPending ? "Creating…" : `Create ${quoted?.count ?? ""} propert${quoted?.count === 1 ? "y" : "ies"}`}
+                </button>
+              </div>
+              {/* Name the REAL reason Create is disabled. "Get a quote first" is only
+                  true when a quote is actually obtainable; when there are no eligible
+                  platforms or a required field is empty, it sends the operator to a
+                  button that is disabled for a different reason again. */}
+              {!quoted && (
+                <div className="fld-hint" style={{ textAlign: "right" }}>
+                  {!canQuote
+                    ? topics.length === 0
+                      ? "Add at least one topic — one per line."
+                      : !targetUrl.trim().startsWith("http")
+                        ? "Add the target URL these properties will link to."
+                        : "Choose a client to continue."
+                    : quoteWentStale
+                      ? "The campaign changed since that quote — get a new one so the price and finish date match what will actually be created."
+                      : "Get a quote first — it shows the cost and the finish date before anything is created."}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

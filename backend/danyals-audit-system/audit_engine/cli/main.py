@@ -1382,7 +1382,20 @@ def full(
         console.print(f"[red]Invalid --mode {mode!r}. Use auto, paid, or free.[/red]")
         raise typer.Exit(code=2)
     if mode == "free":
-        psi = False
+        # FREE MODE KILLS EVERY *PAID* INTEGRATION. That is the guarantee, and it is
+        # unchanged: Moz, Serper, Places and citation discovery all cost money per call, so
+        # a free run may never fire them whatever flags a caller passes.
+        #
+        # PageSpeed is NOT one of them. Google's PageSpeed Insights API is free - it is
+        # bounded by a request quota, not by a bill - so clearing it here bought no spend
+        # protection at all and cost every free audit its Core Web Vitals, which is the
+        # single most persuasive page in a sales audit. This file's own --mode help text has
+        # always said free mode keeps "free PSI (rate-limited)"; the code disagreed with the
+        # documentation, and the documentation was right.
+        #
+        # So `psi` is now HONOURED in free mode: passing --psi opts in, and the default
+        # (--no-psi) leaves a free run exactly as it was. A caller that wants a genuinely
+        # zero-request run still gets one; a caller that wants vitals asks for them.
         moz = False
         serper = False
         places = False

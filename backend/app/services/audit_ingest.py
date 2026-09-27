@@ -34,6 +34,7 @@ from app.services.audit_altitude import (
     assign_templates,
     build_causes,
 )
+from app.services.audit_crawl_health import assess as assess_crawl
 
 log = logging.getLogger(__name__)
 
@@ -57,6 +58,9 @@ class IngestResult:
     capped: bool = False
     scope_key: str = ""
     basis_hash: str = ""
+    #: Whether we actually got to look at the site (0160): ok | thin | blocked.
+    crawl_verdict: str = ""
+    crawl_note: str = ""
 
     @property
     def truncated(self) -> int:
@@ -190,6 +194,7 @@ def ingest(
     run_uuid: str = "",
     tier: str = "",
     types: list[str] | None = None,
+    planned_pages: int = 0,
 ) -> IngestResult:
     """Load one audit's artifacts into ``audit_pages`` / ``audit_findings`` /
     ``audit_finding_instances`` / ``audit_rollups``."""
@@ -206,9 +211,21 @@ def ingest(
     result = IngestResult(audit_id=audit_id, scope_key=scope, basis_hash=basis)
     result.instances_observed = sum(c.instance_count for c in causes)
 
+    # DID WE ACTUALLY GET TO LOOK AT THIS SITE? Asked here because this is where the run's
+    # own page rows are in hand, and answered once: the report banner, the dashboard row
+    # and the publish warning all read the stored verdict rather than each deriving it.
+    health = assess_crawl(pages, planned=planned_pages)
+    result.crawl_verdict, result.crawl_note = health.verdict, health.note
+
     counts = _page_issue_counts(causes)
 
     with privileged_connection() as cur:
+        # The crawl verdict belongs to the RUN, so it is written even when it is clean:
+        # '' means "not assessed" and must not be left standing on an audit we did assess.
+        cur.execute(
+            "update public.audits set crawl_verdict = %s, crawl_note = %s where id = %s",
+            (health.verdict, health.note, audit_id),
+        )
         # --- pages (replace wholesale: they belong to this run) ---
         cur.execute("delete from public.audit_pages where audit_id = %s", (audit_id,))
         page_rows = []
@@ -346,6 +363,8 @@ def ingest(
                 r.pages_affected, r.pages_crawled, json.dumps(r.severity_counts),
                 json.dumps(r.status_counts), r.score, r.url_health_pct,
                 r.basis_hash, r.scoring_model_version,
+                # WHY an unmeasured row is unmeasured (0159). Empty for a measured row.
+                r.not_measured_reason, r.blocked_on,
             )
             for r in rollups
         ]
@@ -356,8 +375,9 @@ def ingest(
                       checks_applicable, checks_planned, checks_ran, checks_skipped,
                       skip_reasons, findings_open, instances_open, pages_affected,
                       pages_crawled, severity_counts, status_counts, score,
-                      url_health_pct, basis_hash, scoring_model_version)
-                   values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                      url_health_pct, basis_hash, scoring_model_version,
+                      not_measured_reason, blocked_on)
+                   values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                    on conflict (audit_id, level, key) do nothing""",
                 roll_rows,
             )

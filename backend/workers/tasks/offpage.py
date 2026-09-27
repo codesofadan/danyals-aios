@@ -38,6 +38,7 @@ from app.core.security import is_public_url
 from app.db.database import privileged_connection
 from app.db.offpage_repo import ServiceOffpageStore, service_offpage_store
 from app.logging_setup import get_logger
+from app.modules.web2 import account_health
 from app.schemas.offpage import action_for
 from app.services import pricing, web2_gate
 from app.services.content_generator import SourcePack
@@ -727,7 +728,20 @@ def _client_from_row(row: dict[str, Any]) -> Web2Client:
 # Pure entry points (wire concrete deps + run the never-raising orchestration).
 # --------------------------------------------------------------------------- #
 def execute_web2_write(store: ServiceOffpageStore, settings: Settings, web2_id: str) -> Web2Outcome:
-    """Draft one planned property to the review gate (wires the writer + gate)."""
+    """Draft one planned property to the review gate (wires the writer + gate).
+
+    Two paths, one outcome shape. With ``ai_graphs_enabled`` the drafting runs as the
+    CHECKPOINTED ``campaign_content`` graph (06-AI-STACK.md §2), which adds resumption
+    and per-platform shaping; otherwise - and whenever the graph cannot run - it runs the
+    linear pipeline that has been publishing all along. The fallback is not a formality:
+    the graph needs an optional extra installed AND migration 0148 applied, and a
+    deployment missing either must keep drafting rather than stall a campaign.
+    """
+    if getattr(settings, "ai_graphs_enabled", False):
+        outcome = _web2_write_via_graph(store, settings, web2_id)
+        if outcome is not None:
+            return outcome
+
     row = store.load_web2(web2_id)
     client = _client_from_row(row) if row else Web2Client(client_id=None, name="")
     writer, model = _writer_for(settings)
@@ -745,6 +759,86 @@ def execute_web2_write(store: ServiceOffpageStore, settings: Settings, web2_id: 
         model=model, tuning=_image_tuning(settings),
         similarity=_similarity_checker(store, settings),
     )
+
+
+def _web2_write_via_graph(
+    store: ServiceOffpageStore, settings: Settings, web2_id: str
+) -> Web2Outcome | None:
+    """Draft one property through the ``campaign_content`` graph.
+
+    Returns ``None`` to mean "the graph did not run - use the linear path", which is the
+    honest answer for a missing extra or an unapplied migration. Returns a
+    :class:`Web2Outcome` when it did run, in the SAME vocabulary the linear path uses, so
+    nothing downstream of ``execute_web2_write`` can tell which path produced it.
+
+    NEVER RAISES, for the reason the whole module never raises: with ``task_acks_late`` a
+    raised exception redelivers the job and re-runs the PAID drafting stage. An
+    unexpected graph failure therefore falls back to the linear path rather than
+    propagating - the property still gets drafted, once.
+    """
+    try:
+        from app.modules.web2.graphs import campaign_content as graph_module
+        from app.platform.ai import graph as graph_runtime
+        from app.platform.ai.router import build_router
+    except ImportError as exc:  # the [graph] extra is not installed
+        logger.info("web2_graph_unavailable", web2_id=web2_id, reason=repr(exc))
+        return None
+
+    row = store.load_web2(web2_id)
+    if row is None:
+        return None  # let the linear path record the missing row in one place
+    client = _client_from_row(row)
+    from workers.tasks.content import _tuning as _image_tuning
+
+    try:
+        state = graph_module.draft_property(
+            web2_id,
+            store=store,
+            router=build_router(settings, _gate(), default_feature_key="content"),
+            settings=settings,
+            similarity=_similarity_checker(store, settings),
+            client=client,
+            capabilities=store.web2_platform_row,
+            tuning=_image_tuning(settings),
+        )
+    except graph_runtime.GraphUnavailable as exc:
+        logger.info("web2_graph_unavailable", web2_id=web2_id, reason=str(exc))
+        return None
+    except Exception:
+        logger.exception("web2_graph_failed_falling_back", web2_id=web2_id)
+        return None
+
+    return _outcome_from_graph(web2_id, state, parked=graph_runtime.parked(state))
+
+
+def _outcome_from_graph(
+    web2_id: str, state: dict[str, Any], *, parked: bool
+) -> Web2Outcome:
+    """Translate final graph state into the pipeline's own outcome vocabulary.
+
+    PARKED IS SUCCESS. The graph stopping at its human-approval interrupt is the drafting
+    stage completing, so it maps to ``needs_review`` - the same terminal state the linear
+    path reaches. A run that did NOT park ended early, and its ``status`` already says
+    why (``unchanged`` on a redelivery, ``blocked`` on the cost gate, ``error`` on a
+    missing row), so that value is carried through unchanged rather than re-derived.
+    """
+    status = str(state.get("status") or "error")
+    reason = str(state.get("error") or "")
+    if parked:
+        publishable = bool(state.get("publishable"))
+        return Web2Outcome(
+            web2_id, "write", "needs_review",
+            reason="drafted" if publishable else "drafted_with_gaps",
+            needs=[str(n) for n in (state.get("needs") or [])],
+            degraded=bool(state.get("degraded")),
+        )
+    if status == "needs_review":
+        # Reached without parking: the degraded no-writer path, which holds for a human.
+        return Web2Outcome(
+            web2_id, "write", "needs_review", degraded=True,
+            reason=reason or "providers_unconfigured",
+        )
+    return Web2Outcome(web2_id, "write", status, reason=reason)  # type: ignore[arg-type]
 
 
 def _similarity_checker(
@@ -772,6 +866,26 @@ def execute_web2_publish(store: ServiceOffpageStore, settings: Settings, web2_id
     gate). ``_publisher_for`` degrades to ``None`` on ANY failure (missing row,
     store error, missing/malformed vault credential) - never raises, so it can never
     bypass ``run_publish``'s own never-raise guarantee below."""
+    # M05 A4, checked HERE rather than in the planner. `web2_pacing` lays out a lawful
+    # SCHEDULE, but three things pull the schedule and reality apart: a tick releases a
+    # BATCH (ten properties, each individually lawful, all at 14:03), a retry publishes
+    # later than planned, and in this deployment `scheduled_for` is NULL by the owner's
+    # 2026-08-29 decision - so an approved campaign publishes everything at once, which
+    # IS the "ten properties in the same minute" footprint M05 §1 names, with no schedule
+    # to have an opinion about it. So the rule has to be an admission check at the moment
+    # of publishing, judged against what has already gone out.
+    admission = _admit_release(store, web2_id)
+    if admission is not None and not admission.released:
+        # HOLD, not fail: the draft is approved and fine, the timing is not. It stays at
+        # `publishing` so the next tick picks it up, and nothing is spent.
+        logger.info(
+            "web2_publish_paced", web2_id=web2_id, reason=admission.reason,
+            retry_after=admission.retry_after.isoformat() if admission.retry_after else "",
+        )
+        return Web2Outcome(
+            web2_id, "publish", "skipped", reason=f"paced:{admission.reason[:120]}"
+        )
+
     publisher = _publisher_for(store, web2_id)
     outcome = run_publish(
         store, web2_id, publisher=publisher, gate=_gate(), settings=settings,
@@ -780,6 +894,76 @@ def execute_web2_publish(store: ServiceOffpageStore, settings: Settings, web2_id
     if outcome.state == "published":
         _record_fingerprint(store, web2_id)
     return outcome
+
+
+def _admit_release(store: ServiceOffpageStore, web2_id: str) -> Any | None:
+    """Whether this property may publish right now (A4). None means "could not tell".
+
+    Returning None on ANY failure is deliberate and is the safe direction here: this
+    guard exists to space publishes out, and a guard that cannot read the ledger should
+    not become a reason nothing publishes at all. The pacing caps in `web2_release` and
+    the per-account ceilings still apply either way.
+    """
+    try:
+        from app.modules.web2.release_guard import RecentPublish, admit
+
+        row = store.load_web2(web2_id)
+        if row is None:
+            return None
+        recent = [
+            RecentPublish(
+                web2_id=str(r.get("web2_id") or ""),
+                platform=str(r.get("platform") or ""),
+                published_at=r["published_at"],
+                client_id=str(r.get("client_id") or ""),
+            )
+            for r in store.recent_web2_publishes(days=2)
+            if r.get("published_at") is not None
+        ]
+        return admit(
+            web2_id=web2_id,
+            platform=str(row.get("platform") or ""),
+            client_id=str(row.get("client_id") or ""),
+            now=datetime.now(UTC),
+            recent=recent,
+        )
+    except Exception:
+        logger.warning("web2_release_guard_unavailable", web2_id=web2_id, exc_info=True)
+        return None
+
+
+def _notify_account_unusable(
+    client_id: str | None, client_name: str, platform: str, reason: str
+) -> None:
+    """Raise the operator alert for an account that can no longer publish.
+
+    REQ-W2-013: "A suspended account raises a task; it does not silently drop posts."
+    The HOLD at ``needs_review`` is the protection - this is how a human finds out that
+    an ACCOUNT, not a draft, is what needs attention.
+
+    Same shape as ``_notify_web2_link_lost`` beside it: lazily imported, best-effort,
+    never raises. The log line fires regardless, so a legacy row with no client id still
+    records the refusal rather than failing silently.
+    """
+    logger.warning(
+        "web2_account_unusable_alert", client=client_name, platform=platform, reason=reason
+    )
+    if not client_id:
+        return
+    try:
+        import asyncio
+
+        from app.services.notifications import raise_alert
+    except Exception:
+        return
+    detail = (
+        f"the {platform} publishing account for {client_name} cannot take another "
+        f"property: {reason}"
+    ).strip()
+    try:
+        asyncio.run(raise_alert(client_id, "lost_link", "warning", detail))
+    except Exception:
+        logger.warning("web2_account_alert_failed", client=client_name, platform=platform)
 
 
 def _fetch_page(url: str) -> str | None:
@@ -872,11 +1056,32 @@ def _publisher_for(store: ServiceOffpageStore, web2_id: str) -> Web2Publisher | 
                     "web2_publisher_account_missing", web2_id=web2_id, account_id=account_id
                 )
                 return None
-            if str(account.get("health") or "") in {"suspended", "deleted"}:
+            # THE FULL GATE, not just the two terminal states (M05 A6 + A9).
+            #
+            # This used to refuse only `suspended` and `deleted`. That let `degraded`
+            # publish exactly as if it were healthy - and `degraded` is the EARLY WARNING
+            # state, the one that exists to mean "this account is failing, stop before the
+            # platform escalates to a suspension we cannot undo". M05 §1 states the rule
+            # it was quietly breaking: keep publishing to a limited account and you lose
+            # it. It also let a house account publish past its property cap, which was
+            # unenforceable anyway until 0150 made `property_count` real.
+            verdict = account_health.evaluate(dict(account))
+            if not verdict.publishable:
                 logger.warning(
                     "web2_publisher_account_unusable", web2_id=web2_id,
-                    account_id=account_id, health=str(account.get("health") or ""),
+                    account_id=account_id, verdict=verdict.verdict,
+                    health=str(account.get("health") or ""), reason=verdict.reason,
                 )
+                if verdict.raises_task:
+                    # REQ-W2-013: a suspended or degrading account raises a task; it does
+                    # not silently drop posts. The placement HOLDS at needs_review either
+                    # way (run_publish's `publisher is None` branch), so nothing is lost -
+                    # but a human is told that an ACCOUNT, not a draft, is the problem.
+                    _notify_account_unusable(
+                        str(row.get("client_id") or "") or None,
+                        str(row.get("client_name") or ""),
+                        platform, verdict.reason,
+                    )
                 return None
             vault_label = str(account.get("vault_label") or "") or account_id
         if not vault_label:

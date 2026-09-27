@@ -152,6 +152,62 @@ class OffpageRepo:
             )
             return cur.fetchall()
 
+    # --- placed links (M05 A8 surface) ----------------------------------------
+    def list_placed_links(
+        self,
+        *,
+        client_id: str | None = None,
+        state: str | None = None,
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> _Rows:
+        """Every outbound link a Web 2.0 property placed, with its measured state.
+
+        Ordered LOST-FIRST, then least-recently-checked. That ordering is the point of the
+        surface: a list sorted by date buries the three links that went missing under two
+        hundred that are fine, and the missing ones are the only rows anybody needs to act
+        on. `unknown` sorts with the actionable rows too - "nobody has looked" is a gap in
+        our monitoring, not a clean bill of health.
+        """
+        query = (
+            "select l.*, p.platform, p.client_name "
+            "from public.placed_links l "
+            "join public.web2_properties p on p.id = l.web2_id"
+        )
+        clauses: list[str] = []
+        params: list[Any] = []
+        if client_id is not None:
+            clauses.append("l.client_id = %s")
+            params.append(client_id)
+        if state is not None:
+            clauses.append("l.state = %s")
+            params.append(state)
+        if clauses:
+            query += " where " + " and ".join(clauses)
+        query += (
+            " order by case l.state when 'removed' then 0 when 'nofollowed' then 1 "
+            "  when 'unknown' then 2 else 3 end, "
+            " l.last_checked_at asc nulls first, l.created_at desc"
+        )
+        if limit is not None:
+            query += " limit %s offset %s"
+            params += [limit, offset]
+        with rls_connection(self._user_id) as cur:
+            cur.execute(query, params)
+            return cur.fetchall()
+
+    def placed_link_counts(self, *, client_id: str | None = None) -> dict[str, int]:
+        """A ``{state: count}`` roll-up over the caller-visible placed links."""
+        query = "select state, count(*) as n from public.placed_links"
+        params: list[Any] = []
+        if client_id is not None:
+            query += " where client_id = %s"
+            params.append(client_id)
+        query += " group by state"
+        with rls_connection(self._user_id) as cur:
+            cur.execute(query, params)
+            return {str(r["state"]): int(r["n"]) for r in cur.fetchall()}
+
     # --- citations ------------------------------------------------------------
     def list_citations(
         self,
@@ -443,6 +499,41 @@ class OffpageRepo:
             )
             return list(cur.fetchall())
 
+    def publishing_accounts_for(self, client_id: str) -> dict[str, dict[str, Any]]:
+        """The accounts that can publish FOR this client, keyed by platform.
+
+        Distinct from ``list_web2_accounts(client_id)``, which answers "which accounts
+        does this client own" - the right question for the account board and the wrong
+        one for a planner. A HOUSE account has ``client_id IS NULL`` by construction
+        (migration 0100's CHECK) and exists precisely to publish on behalf of clients, so
+        a planner that only looked at per-client rows refused work the agency can
+        genuinely do - which is exactly what the first live broadcast run reported.
+
+        PER-CLIENT WINS a platform collision. ADR-014's whole point: a client-owned
+        identity bounds the blast radius of a ban to one client, where a shared house
+        account is a shared failure domain. So where both exist, the safer one is used
+        and the house account stays for clients that have nothing of their own.
+        """
+        with rls_connection(self._user_id) as cur:
+            cur.execute(
+                "select a.id, a.platform, a.ownership, a.client_id, a.handle, "
+                "       a.health, a.property_count, a.max_properties, "
+                "       a.vault_provider, a.vault_label "
+                "from public.web2_accounts a "
+                "where a.client_id = %s or a.ownership = 'house' "
+                # per_client sorts before house, so the dict build below keeps the
+                # client-owned row when a platform has both.
+                "order by a.platform, a.ownership",
+                (client_id,),
+            )
+            rows = list(cur.fetchall())
+        accounts: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            platform = str(row.get("platform") or "")
+            if platform and platform not in accounts:
+                accounts[platform] = dict(row)
+        return accounts
+
     def get_web2_account(self, account_id: str) -> dict[str, Any] | None:
         with rls_connection(self._user_id) as cur:
             cur.execute(
@@ -522,7 +613,11 @@ class OffpageRepo:
     #: The mailbox password is NEVER selected here - only its vault coordinates.
     _IDENTITY_COLUMNS = (
         "web2_handle_base, web2_contact_email, web2_imap_host, web2_imap_port, "
-        "web2_imap_user, web2_imap_vault_provider, web2_imap_vault_label, web2_brief"
+        "web2_imap_user, web2_imap_vault_provider, web2_imap_vault_label, web2_brief, "
+        # The ONE login this client uses across every platform (0151). The password is
+        # NEVER selected - only its vault coordinates, so a row that leaks carries no
+        # credential. `web2_username` is not a secret: it is the public-facing login name.
+        "web2_username, web2_password_vault_provider, web2_password_vault_label"
     )
 
     def client_web2_identity(self, client_id: str) -> dict[str, Any] | None:
@@ -556,20 +651,60 @@ class OffpageRepo:
         imap_user: str,
         vault_provider: str,
         vault_label: str,
+        username: str = "",
+        password_vault_provider: str = "",
+        password_vault_label: str = "",
     ) -> dict[str, Any] | None:
-        """Write the identity. Lead-gated at the route; RLS re-checks at the table."""
+        """Write the identity. Lead-gated at the route; RLS re-checks at the table.
+
+        The shared-login fields (0151) carry the client's ONE username and the vault
+        COORDINATES of its password - never the password, which unlocks every platform
+        this client is on.
+        """
         with rls_connection(self._user_id) as cur:
             cur.execute(
                 "update public.clients set web2_handle_base = %s, web2_contact_email = %s, "
                 "  web2_imap_host = %s, web2_imap_port = %s, web2_imap_user = %s, "
-                "  web2_imap_vault_provider = %s, web2_imap_vault_label = %s "
+                "  web2_imap_vault_provider = %s, web2_imap_vault_label = %s, "
+                "  web2_username = %s, web2_password_vault_provider = %s, "
+                "  web2_password_vault_label = %s "
                 f"where id = %s returning id, name, {self._IDENTITY_COLUMNS}",
                 (
                     handle_base, contact_email, imap_host, imap_port, imap_user,
-                    vault_provider, vault_label, client_id,
+                    vault_provider, vault_label, username, password_vault_provider,
+                    password_vault_label, client_id,
                 ),
             )
             return cur.fetchone()
+
+    def client_sealed_platform_fields(self, client_id: str) -> dict[str, frozenset[str]]:
+        """Which credential FIELDS are already sealed per platform for this client.
+
+        Feeds the connection plan so a platform whose token was fetched last month reports
+        ``ready`` instead of appearing on the to-do list forever. Reads the account rows,
+        never the vault: the question is "is a credential held", not "what is it".
+        """
+        with rls_connection(self._user_id) as cur:
+            cur.execute(
+                "select a.platform, a.vault_label "
+                "from public.web2_accounts a "
+                "where a.client_id = %s or a.ownership = 'house'",
+                (client_id,),
+            )
+            rows = cur.fetchall()
+        # A sealed account means every field that platform's adapter needs is held: the
+        # registration CLI refuses to seal a partial credential, so "a row exists" is
+        # equivalent to "the credential is complete" without opening the vault.
+        from integrations.web2_publishers import PLATFORM_CREDENTIAL_FIELDS
+
+        sealed: dict[str, frozenset[str]] = {}
+        for row in rows:
+            platform = str(row.get("platform") or "")
+            if not row.get("vault_label"):
+                continue
+            fields = PLATFORM_CREDENTIAL_FIELDS.get(platform, ())
+            sealed[platform] = frozenset(f.lower() for f in fields)
+        return sealed
 
     # --- the account provisioning queue (0123) --------------------------------
     def list_provision_items(self, client_id: str | None = None) -> _Rows:
@@ -1047,6 +1182,63 @@ class ServiceOffpageStore:
                 (limit,),
             )
             return list(cur.fetchall())
+
+    def upsert_placed_link(self, web2_id: str, fields: dict[str, Any]) -> None:
+        """Record or update one placed link (M05 A8).
+
+        Keyed on ``(web2_id, target_url)`` - the unique constraint 0150 declares - so a
+        re-check updates the existing row rather than accumulating one row per look. The
+        ledger holds the CURRENT state plus the dates that bound it; the per-look history
+        is the job of the cost/activity logs, not of a table the client report reads.
+
+        ``lost_at`` is written explicitly even when None, because clearing it is how a
+        recovered link stops being reported as lost - a COALESCE-style "keep the old value
+        unless a new one is given" would make recovery invisible.
+        """
+        columns = (
+            "client_id", "page_url", "target_url", "anchor", "state", "rel",
+            "first_seen_at", "last_checked_at", "lost_at",
+        )
+        payload = {key: fields.get(key) for key in columns if key in fields}
+        if not payload.get("page_url") or not payload.get("target_url"):
+            return  # nothing to record: no page to fetch or no link to look for
+        cols = ["web2_id", *payload.keys()]
+        placeholders = ", ".join(["%s"] * len(cols))
+        updates = ", ".join(
+            f"{key} = excluded.{key}" for key in payload if key != "target_url"
+        )
+        with privileged_connection() as cur:
+            cur.execute(
+                f"insert into public.placed_links ({', '.join(cols)}) "
+                f"values ({placeholders}) "
+                "on conflict (web2_id, target_url) do update set "
+                f"{updates}",
+                (web2_id, *payload.values()),
+            )
+
+    def web2_platform_row(self, platform: str) -> dict[str, Any] | None:
+        """One platform's CAPABILITY MATRIX row (0135), keyed by its ``platform_enum``.
+
+        Feeds the ``campaign_content`` graph's shaping node, which turns these measured
+        facts into the note the writer drafts against. A single-row read rather than
+        reusing ``list_web2_platforms`` because the graph asks per property and pulling
+        the whole 90-row catalogue to find one of them, once per placement, is a
+        campaign's worth of wasted queries.
+
+        Returns ``None`` for an uncatalogued platform, which the caller must render as
+        "nothing is known" rather than as a set of confident defaults - a writer told an
+        invented convention produces an article that is wrong in a way nobody traces
+        back to here.
+        """
+        with privileged_connection() as cur:
+            cur.execute(
+                "select name, platform_enum, mechanism, ownership_tier, topical_scope, "
+                "       authority_tier, terms_position, adapter_status, media_support, "
+                "       link_verifiable "
+                "from public.web2_platforms where platform_enum = %s limit 1",
+                (platform,),
+            )
+            return cur.fetchone()
 
     # --- citations (monitoring diff/apply) ------------------------------------
     def list_citations_for_client(self, client_id: str) -> _Rows:

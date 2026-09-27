@@ -58,7 +58,7 @@ from app.services import pricing
 from app.services.cost_gate import CostGate, GateContext
 from app.services.cost_store import PostgresCostStore
 from integrations.errors import ProviderNotConfiguredError
-from integrations.llm import LLMResult
+from integrations.llm import REASONING_TOKEN_FLOOR, LLMResult
 
 logger = get_logger("app.services.site_design")
 
@@ -154,9 +154,27 @@ class AnthropicSystemSummarizer:
             ]
         else:
             user_content = prompt
+        # THE SAME REASONING FLOOR THE OTHER ANTHROPIC SEAM APPLIES
+        # (``integrations.llm.REASONING_TOKEN_FLOOR``), for the same measured reason and
+        # now from the same constant.
+        #
+        # MEASURED 2026-09-25 against the live API. This call ran at the configured
+        # ``content_design_max_tokens`` of 4096 on ``claude-opus-5``, where thinking is ON
+        # BY DEFAULT and is billed out of the SAME ceiling as the answer. The reply came
+        # back ``stop_reason=max_tokens`` carrying a ``thinking`` block plus 7,709
+        # characters of design JSON cut off mid-object - so the parser found no complete
+        # object and ``extract_site_design`` could only report ``analysis_failed``. Every
+        # design capture failed, and the operator saw a degrade with no reason they could
+        # act on.
+        #
+        # Raising a ceiling can only prevent a truncation, never cause one: ``max_tokens``
+        # is a runaway guard, billing is on tokens actually produced, and the JSON
+        # contract in the system prompt is what bounds the length. A caller that already
+        # asks for more keeps its own value.
+        budget = max(int(max_tokens), REASONING_TOKEN_FLOOR)
         kwargs: dict[str, Any] = {
             "model": model,
-            "max_tokens": max_tokens,
+            "max_tokens": budget,
             "messages": [{"role": "user", "content": user_content}],
         }
         if system:
@@ -353,6 +371,53 @@ class SiteDesignProfile:
         }
 
 
+#: URL-path keywords -> the page type a captured URL most likely IS.
+#:
+#: ORDERED MOST SPECIFIC FIRST, and the order is load-bearing rather than cosmetic:
+#: "/service-area" CONTAINS "/service", so a service-area page classifies as an
+#: ordinary service page unless its own entry is checked first. Likewise
+#: "/services/austin-drain-cleaning" is a service page that happens to contain a
+#: location word. Every value here is either a job page type or a template key, both
+#: of which ``page_blueprints.template_for_page_type`` resolves.
+_PATH_PAGE_TYPE: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("faq", ("/faq", "/faqs", "/questions", "/help")),
+    ("service_area", ("/service-area", "/service-areas", "/areas-we-serve",
+                      "/area-we-serve", "/areas-served")),
+    ("service", ("/service", "/services", "/what-we-do", "/treatments")),
+    ("local", ("/location", "/locations", "/areas", "/cities", "/branch")),
+    ("blog", ("/blog", "/news", "/article", "/articles", "/insights", "/resources",
+              "/guides", "/post")),
+)
+
+
+def classify_captured_page_type(url: str) -> str:
+    """What KIND of page this URL is, from its path alone - or '' when unclear.
+
+    A capture measures one page, and its section sequence is evidence about that
+    page's type only (see ``page_blueprints.resolve_blueprint``). The operator can
+    state the type; this is the fallback when they did not.
+
+    '' IS A FIRST-CLASS ANSWER AND THE SAFE DEFAULT. A sequence stored under no key
+    is never used as per-type evidence, so an unclear URL costs nothing. A GUESS, on
+    the other hand, is stored as fact and would reshape every page of the type it
+    guessed - so this only answers when the path actually says so. Deliberately not
+    a model call: a URL path is a string, and paying for an opinion about it would be
+    absurd.
+    """
+    from urllib.parse import urlsplit
+
+    try:
+        path = (urlsplit((url or "").strip()).path or "").lower().rstrip("/")
+    except ValueError:
+        return ""
+    if not path:
+        return "homepage"  # the site root IS the homepage
+    for page_type, needles in _PATH_PAGE_TYPE:
+        if any(needle in path for needle in needles):
+            return page_type
+    return ""
+
+
 @dataclass(frozen=True)
 class DesignResult:
     """The verdict of one :func:`extract_site_design` run (a small, comparable value)."""
@@ -387,14 +452,22 @@ _DESIGN_SYSTEM_PROMPT = (
     "in exact top-to-bottom sequence) where each object is {kind (the same vocabulary as "
     'section_order), heading (the ACTUAL heading text shown in that section, or ""), layout '
     "(how that section is laid out: split/centered/stacked/grid/numbered-steps/accordion/banner/"
-    "carousel/cards/map-embed/tiles/list)} - so the FULL page structure is captured section by "
+    "carousel/cards/map-embed/tiles/list), items (how many REPEATED items that section "
+    "presents - three pricing cards, four testimonials, six service tiles; 0 when the "
+    "section is not a repeating set), headingChars (the approximate character length of "
+    "that section's heading as shown), bodyChars (the approximate character length of that "
+    "section's body copy as shown)} - so the FULL page structure is captured section by "
     "section, not just the kind order - hero_style, and cta_style), components (an "
     "object with button_style, card_style, spacing_scale), notes (a short string of any "
     "other useful observations), and wireframe_html (a SELF-CONTAINED, styled HTML snippet "
     "- an inline <style> block plus ONE <section> - that renders a representative "
     "hero/homepage section using the colours, fonts and layout you extracted, so a human "
     "can SEE how a matching page would look; keep it to one screen, inline every style, "
-    "reference no external assets, and make it valid standalone HTML). Report the REAL "
+    "reference no external assets, and make it valid standalone HTML). The items / "
+    "headingChars / bodyChars numbers are each section's CAPACITY, and they matter as much "
+    "as its order: a page that follows the right sequence but overflows every slot does not "
+    "match the design, so estimate them from what you can see rather than omitting them. "
+    "Report the REAL "
     "design you observe - accurate hexes, real fonts, the true section order - so the "
     "profile VARIES per site; never fall back to a generic template, and never invent a "
     "brand the site does not actually show."

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -89,10 +90,17 @@ def test_build_argv_paid_enables_providers() -> None:
 
 
 def test_build_argv_deep_is_the_full_audit() -> None:
-    # `deep` = every provider + all agents + the narrative.
+    """`deep` buys every provider, all 21 agents and the narrative.
+
+    UPDATED FOR 0147: the local pipeline needs BOTH a depth that buys paid providers
+    AND a client the local checks are about. Depth alone used to decide it, which ran
+    Google Places and citation discovery for every deep audit of every client - so a
+    SaaS client paid for lookups about a Google Business Profile it does not have and
+    got findings describing its absence.
+    """
     argv = build_argv(
         domain="example.com", mode="paid", max_pages=100, profile="general",
-        comprehensive=True, depth="deep",
+        comprehensive=True, depth="deep", is_local_business=True,
     )
     assert argv[argv.index("--mode") + 1] == "paid"
     for flag in ("--serper", "--places", "--citations"):
@@ -102,6 +110,23 @@ def test_build_argv_deep_is_the_full_audit() -> None:
     # Places/citations are gated behind the profile, not the flag: passing
     # `--places` under `--profile general` is accepted and then does nothing.
     assert argv[argv.index("--profile") + 1] == "local"
+
+
+def test_build_argv_deep_skips_the_local_pipeline_for_a_non_local_client() -> None:
+    """The other half of 0147, and the half that was costing money.
+
+    A deep audit still buys SERP, PageSpeed, the agents and the narrative - but a
+    client with no Google Business Profile must not be charged for Places and
+    citation discovery, nor told it is missing a listing it never wanted.
+    """
+    argv = build_argv(
+        domain="saas.example", mode="paid", max_pages=100, profile="general",
+        comprehensive=True, depth="deep", is_local_business=False,
+    )
+    assert argv[argv.index("--profile") + 1] == "general"
+    assert "--no-places" in argv and "--no-citations" in argv
+    assert "--serper" in argv
+    assert argv[argv.index("--agents") + 1] == "on"
 
 
 def test_build_argv_standard_buys_corroboration_not_agents() -> None:
@@ -117,7 +142,7 @@ def test_build_argv_standard_buys_corroboration_not_agents() -> None:
     assert argv[argv.index("--ai-narrative") + 1] == "off"
 
 
-def test_build_argv_free_depth_fires_no_paid_work_at_all() -> None:
+def test_build_argv_free_depth_buys_nothing_but_still_takes_the_free_vitals() -> None:
     argv = build_argv(
         domain="example.com", mode="free", max_pages=15, profile="general",
         comprehensive=True, depth="free",
@@ -126,10 +151,23 @@ def test_build_argv_free_depth_fires_no_paid_work_at_all() -> None:
     # pin it, so a run described to the operator as free was handed to the engine
     # as paid - the asked-for-free-got-paid shape WU-7 removed from the funnel.
     assert argv[argv.index("--mode") + 1] == "free"
-    for flag in ("--no-psi", "--no-serper", "--no-places", "--no-citations"):
+
+    # EVERYTHING THAT COSTS MONEY IS OFF, and that is the whole free guarantee.
+    for flag in ("--no-serper", "--no-places", "--no-citations"):
         assert flag in argv
+    assert "--no-moz" in argv
     assert argv[argv.index("--agents") + 1] == "off"
     assert argv[argv.index("--ai-narrative") + 1] == "off"
+
+    # PSI IS ON, and it is not an exception to the line above. PageSpeed Insights is
+    # metered by a request quota, not by a bill, so clearing it bought no spend
+    # protection and cost every free audit its Core Web Vitals - the most persuasive
+    # page in a sales audit, missing from the audit whose entire job is to persuade.
+    # The engine's own `--mode` help text always said free mode keeps "free PSI
+    # (rate-limited)"; the code disagreed, and the help text was right. Fixed on both
+    # sides, so `--mode free` engine-side still hard-clears Moz/Serper/Places/citations
+    # and `pricing.audit_cost` still derives 0.0 from the run's OWN reported mode.
+    assert "--psi" in argv and "--no-psi" not in argv
 
 
 def test_build_argv_defaults_an_unknown_depth_to_standard() -> None:
@@ -154,11 +192,67 @@ def test_run_audit_forwards_depth_to_argv(
         _write_artifacts(engine.engine_dir, url, _UUID, scores={"overall": 70})
 
     _fake_run_factory(monkeypatch, returncode=0, stdout=f"Run UUID: {_UUID}\n", side=_side)
-    res = run_audit(engine, url=url, tier="paid", comprehensive=True, depth="deep")
+    res = run_audit(
+        engine, url=url, tier="paid", comprehensive=True, depth="deep",
+        # 0147: the local pipeline needs the CLIENT to be a local business too, not
+        # just a depth that can afford it.
+        is_local_business=True,
+    )
     assert res.ok is True
     argv = captured["argv"]
     assert argv[argv.index("--profile") + 1] == "local"
     assert "--places" in argv
+
+
+def test_the_backlink_credential_reaches_the_engine(
+    engine: AuditEngineConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """THE DEFECT THAT MADE off_page NULL ON EVERY AUDIT EVER RUN.
+
+    The engine's off-page dimension IS 39 checks reading one DataForSEO backlink
+    profile. It looks the credential up with `os.getenv("DATAFORSEO_LOGIN")` - and the
+    credential lived only in the PLATFORM's `.env`, which pydantic-settings reads into
+    `Settings` WITHOUT exporting to `os.environ`. So the spawned engine never saw it,
+    `client.profile()` returned an error, all 39 checks emitted `n_a`, and
+    `_team_score` (which excludes `n_a`) returned None. The card read "Not measured".
+
+    Asserting on the CHILD ENVIRONMENT rather than on argv because there is no flag
+    for this: the credential's only route into the engine is the environment.
+    """
+    seen: dict[str, Any] = {}
+
+    def _side(args: list[str], kwargs: dict[str, Any]) -> None:
+        seen["env"] = kwargs["env"]
+        _write_artifacts(engine.engine_dir, "https://example.com", _UUID, scores={"overall": 70})
+
+    _fake_run_factory(monkeypatch, returncode=0, stdout=f"Run UUID: {_UUID}\n", side=_side)
+    cfg = replace(engine, dataforseo_login="dfs-user", dataforseo_password="dfs-secret")
+    assert run_audit(cfg, url="https://example.com", tier="paid", comprehensive=True).ok
+
+    assert seen["env"]["DATAFORSEO_LOGIN"] == "dfs-user"
+    assert seen["env"]["DATAFORSEO_PASSWORD"] == "dfs-secret"
+
+
+def test_a_missing_backlink_credential_is_not_injected_as_a_blank(
+    engine: AuditEngineConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A blank would be WORSE than nothing.
+
+    `load_dotenv` leaves an already-set variable alone, so injecting an empty string
+    would MASK a credential the engine's own `.env` legitimately carries - turning a
+    working install into a silently key-less one.
+    """
+    seen: dict[str, Any] = {}
+
+    def _side(args: list[str], kwargs: dict[str, Any]) -> None:
+        seen["env"] = kwargs["env"]
+        _write_artifacts(engine.engine_dir, "https://example.com", _UUID, scores={"overall": 70})
+
+    _fake_run_factory(monkeypatch, returncode=0, stdout=f"Run UUID: {_UUID}\n", side=_side)
+    assert run_audit(engine, url="https://example.com", tier="paid", comprehensive=True).ok
+
+    assert "DATAFORSEO_LOGIN" not in seen["env"]
+    assert "DATAFORSEO_PASSWORD" not in seen["env"]
 
 
 def test_parse_run_uuid() -> None:
@@ -269,3 +363,49 @@ def test_run_audit_unconfigured_engine(tmp_path: Path, monkeypatch: pytest.Monke
     res = run_audit(cfg, url="https://example.com", tier="free")
     assert res.ok is False
     assert res.error is not None and "not configured" in res.error
+
+
+# --------------------------------------------------------------------------- #
+# THE ENGINE'S MODEL TIERS REACH THE ENGINE.
+#
+# The engine is a subprocess that resolves its models with `os.getenv`. The platform's
+# `.env` is read into `Settings` and NOT exported to `os.environ`, so a deployment that
+# has deliberately moved off Opus still paid Opus prices for every audit narrative - the
+# engine's own fallback when neither variable is set is an Opus tier. Exactly the shape of
+# the DataForSEO bug that left all 39 off-page checks returning `n_a` for months: a value
+# configured on the platform that silently never reaches the child.
+# --------------------------------------------------------------------------- #
+class TestTheChildIsToldWhichModelsToUse:
+    @staticmethod
+    def _child_env(engine: AuditEngineConfig, monkeypatch: pytest.MonkeyPatch, **over: Any) -> dict[str, str]:
+        captured: dict[str, Any] = {}
+
+        def _side(args: list[str], kwargs: dict[str, Any]) -> None:
+            captured["env"] = kwargs.get("env") or {}
+            _write_artifacts(engine.engine_dir, "https://example.com", _UUID, scores={"overall": 70})
+
+        _fake_run_factory(
+            monkeypatch, returncode=0, stdout=f"Run UUID: {_UUID}\n", side=_side
+        )
+        run_audit(replace(engine, **over), url="https://example.com", tier="free")
+        return dict(captured["env"])
+
+    def test_the_configured_models_are_handed_over(
+        self, engine: AuditEngineConfig, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        env = self._child_env(
+            engine, monkeypatch,
+            agent_model="claude-sonnet-5", narrative_model="claude-haiku-4-5",
+        )
+        assert env["AUDIT_AGENT_MODEL"] == "claude-sonnet-5"
+        assert env["AUDIT_NARRATIVE_MODEL"] == "claude-haiku-4-5"
+
+    def test_blank_leaves_the_engines_own_choice_alone(
+        self, engine: AuditEngineConfig, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Writing an empty string would be WORSE than writing nothing: the engine's
+        `load_dotenv` leaves an already-set variable alone, so a blank injected here would
+        MASK a value its own `.env` legitimately carries."""
+        env = self._child_env(engine, monkeypatch, agent_model="", narrative_model="")
+        assert "AUDIT_AGENT_MODEL" not in env
+        assert "AUDIT_NARRATIVE_MODEL" not in env

@@ -67,6 +67,13 @@ vi.mock("@/lib/hooks/audits", () => ({
 vi.mock("@/lib/hooks/clients", () => ({
   useClients: () => ({ data: [{ id: "c-1", name: "Verde Cafe" }], isLoading: false }),
 }));
+vi.mock("@/lib/hooks/readiness", () => ({
+  // AuditWorkspace renders the readiness panel, which reads through react-query. These
+  // tests render the workspace WITHOUT a QueryClientProvider (deliberately - they mock
+  // every hook instead), so the hook is stubbed here rather than the provider added.
+  // "no data" makes the panel render nothing, which is what this file wants to look at.
+  useReadiness: () => ({ data: undefined, isError: false, isLoading: true }),
+}));
 vi.mock("@/lib/hooks/cost", () => ({ useSpendHalted: () => ({ halted: false }) }));
 
 import AuditWorkspace from "./AuditWorkspace";

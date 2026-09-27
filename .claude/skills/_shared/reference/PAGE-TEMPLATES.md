@@ -18,113 +18,112 @@ path renders as a styled component.
 
 ## Service page  (`template=service`)
 
-Default for page type: `service`. Split hero + a repeated CTA (hero + bottom banner); benefits/features as grids.
+Default for page type: `service`. Split hero; deliverables as a grid; numbered process; proof + price last.
 
 | # | kind | layout | role | heading |
 |---|------|--------|------|---------|
 | 1 | `hero` | `split` | content | {primary} |
-| 2 | `trust_bar` | `carousel` | chrome | Trusted by |
-| 3 | `intro` | `stacked` | content | Why {primary} matters |
-| 4 | `benefits` | `grid` | content | The benefits of choosing {client} |
-| 5 | `features` | `grid` | content | What's included |
-| 6 | `process` | `numbered-steps` | content | How it works |
-| 7 | `proof` | `stacked` | content | Proven results |
-| 8 | `testimonials` | `carousel` | content | What clients say |
-| 9 | `pricing` | `cards` | content | Pricing |
-| 10 | `faq` | `accordion` | content | Frequently asked questions |
-| 11 | `cta` | `banner` | content | Get started with {primary} |
+| 2 | `features` | `grid` | content | What's included |
+| 3 | `process` | `numbered-steps` | content | How it works |
+| 4 | `faq` | `accordion` | content | Frequently asked questions |
+| 5 | `testimonials` | `carousel` | content | What clients say |
+| 6 | `pricing` | `cards` | content | Pricing |
+| 7 | `cta` | `banner` | content | Get started with {primary} |
 
 ## Location page  (`template=location`)
 
-Default for page type: `local`. Location-specific hero + real photos; NAP/hours/map are theme-supplied chrome.
+Default for page type: `local`. Hero + local intro + services; NAP and reviews render only from real data.
 
 | # | kind | layout | role | heading |
 |---|------|--------|------|---------|
 | 1 | `hero` | `split` | content | {primary} in {city} |
-| 2 | `contact` | `nap` | chrome | Visit us |
-| 3 | `hours` | `list` | chrome | Opening hours |
-| 4 | `intro` | `stacked` | content | About our {city} location |
-| 5 | `services` | `grid` | content | Services at this location |
+| 2 | `intro` | `stacked` | content | About our {city} location |
+| 3 | `services` | `grid` | content | Services at this location |
+| 4 | `faq` | `accordion` | content | Frequently asked questions |
+| 5 | `contact` | `nap` | chrome | Visit us |
 | 6 | `reviews` | `carousel` | chrome | Local reviews |
-| 7 | `team` | `cards` | chrome | Meet the team |
-| 8 | `gallery` | `grid` | chrome | Our {city} location |
-| 9 | `map` | `map-embed` | chrome | Find us |
-| 10 | `service_areas` | `list` | chrome | Areas we serve nearby |
-| 11 | `faq` | `accordion` | content | Frequently asked questions |
-| 12 | `cta` | `banner` | content | Book at our {city} location |
+| 7 | `cta` | `banner` | content | Book at our {city} location |
 
 ## Service-area page  (`template=service_area`)
 
-Default for page type: `local`. Lead with service + unique local content, not NAP; explicit covered-areas list.
+Default for page type: `local`. Service + area content first; the covered-areas list is the page's spine.
 
 | # | kind | layout | role | heading |
 |---|------|--------|------|---------|
 | 1 | `hero` | `split` | content | {primary} in {city} |
-| 2 | `trust_bar` | `carousel` | chrome | Trusted locally |
-| 3 | `intro` | `stacked` | content | Serving {city} and the surrounding area |
-| 4 | `services` | `grid` | content | What we offer in {city} |
+| 2 | `intro` | `stacked` | content | Serving {city} and the surrounding area |
+| 3 | `services` | `grid` | content | What we offer in {city} |
+| 4 | `process` | `numbered-steps` | content | How it works |
 | 5 | `service_areas` | `list` | content | Areas we cover |
-| 6 | `benefits` | `grid` | content | Why choose {client} |
-| 7 | `reviews` | `carousel` | chrome | What local customers say |
-| 8 | `process` | `numbered-steps` | content | How it works |
-| 9 | `map` | `map-embed` | chrome | Our coverage area |
-| 10 | `faq` | `accordion` | content | Frequently asked questions |
-| 11 | `cta` | `banner` | content | Request {primary} in {city} |
+| 6 | `reviews` | `carousel` | chrome | What local customers say |
+| 7 | `cta` | `banner` | content | Request {primary} in {city} |
 
 ## Blog / article  (`template=blog`)
 
-Default for page type: `blog`. Stacked hero (title + featured image); body absorbs the H2 blocks; sticky ToC.
+Default for page type: `blog`. Stacked hero; body absorbs the H2 blocks; evidence block only when cited.
 
 | # | kind | layout | role | heading |
 |---|------|--------|------|---------|
 | 1 | `hero` | `stacked` | content | {primary} |
 | 2 | `intro` | `stacked` | content | Introduction |
-| 3 | `related` | `toc` | chrome | In this article |
-| 4 | `body` | `stacked` | content (absorbs overflow) | - |
-| 5 | `proof` | `stacked` | content | The evidence |
-| 6 | `faq` | `accordion` | content | Frequently asked questions |
-| 7 | `conclusion` | `stacked` | content | Conclusion |
-| 8 | `cta` | `banner` | content | Next steps |
+| 3 | `body` | `stacked` | content (absorbs overflow) | - |
+| 4 | `faq` | `accordion` | content | Frequently asked questions |
+| 5 | `conclusion` | `stacked` | content | Conclusion |
+| 6 | `proof` | `stacked` | content | The evidence |
+| 7 | `cta` | `banner` | content | Next steps |
 
 ## FAQ page  (`template=faq`)
 
-Default for page type: `blog`. Accordion for 10+ questions (plain list under ~10); simplest questions first.
+Default for page type: `blog`. Accordion body; a services grid so the page sells as well as answers.
 
 | # | kind | layout | role | heading |
 |---|------|--------|------|---------|
 | 1 | `hero` | `centered` | content | Frequently asked questions |
-| 2 | `search` | `stacked` | chrome | Search the FAQ |
-| 3 | `related` | `list` | chrome | Browse by topic |
-| 4 | `faq` | `accordion` | content (absorbs overflow) | Questions & answers |
-| 5 | `cta` | `banner` | content | Still have questions? |
+| 2 | `intro` | `stacked` | content | What this page answers |
+| 3 | `faq` | `accordion` | content (absorbs overflow) | Questions & answers |
+| 4 | `services` | `grid` | content | What we do |
+| 5 | `proof` | `stacked` | content | Where these answers come from |
+| 6 | `related` | `list` | chrome | Related reading |
+| 7 | `cta` | `banner` | content | Still have questions? |
 
 ## Local business landing  (`template=local`)
 
-Default for page type: `local`. H1 = service + location + differentiator; primary CTA is tap-to-call.
+Default for page type: `local`. H1 = service + location + differentiator; the CTA is tap-to-call.
 
 | # | kind | layout | role | heading |
 |---|------|--------|------|---------|
 | 1 | `hero` | `split` | content | {primary} in {city} |
-| 2 | `trust_bar` | `carousel` | chrome | Rated by locals |
-| 3 | `services` | `grid` | content | Our services |
-| 4 | `about` | `stacked` | content | About {client} |
-| 5 | `reviews` | `carousel` | chrome | Customer reviews |
-| 6 | `service_areas` | `list` | content | Areas we serve |
-| 7 | `map` | `map-embed` | chrome | Where we are |
-| 8 | `cta` | `banner` | content | Call {client} today |
+| 2 | `services` | `grid` | content | Our services |
+| 3 | `about` | `stacked` | content | About {client} |
+| 4 | `faq` | `accordion` | content | Frequently asked questions |
+| 5 | `service_areas` | `list` | content | Areas we serve |
+| 6 | `reviews` | `carousel` | chrome | Customer reviews |
+| 7 | `cta` | `banner` | content | Call {client} today |
 
 ## Homepage  (`template=homepage`)
 
-Default for page type: `service`. One primary CTA repeated top + bottom; logo trust strip under the hero.
+Default for page type: `service`. One primary CTA repeated top + bottom; proof only where proof exists.
 
 | # | kind | layout | role | heading |
 |---|------|--------|------|---------|
 | 1 | `hero` | `split` | content | {client} |
-| 2 | `trust_bar` | `carousel` | chrome | Trusted by |
-| 3 | `benefits` | `grid` | content | What you get |
-| 4 | `features` | `grid` | content | How it works |
-| 5 | `proof` | `stacked` | content | Proven results |
+| 2 | `benefits` | `grid` | content | What you get |
+| 3 | `services` | `grid` | content | What we do |
+| 4 | `process` | `numbered-steps` | content | How it works |
+| 5 | `about` | `stacked` | content | About {client} |
 | 6 | `testimonials` | `carousel` | content | What clients say |
-| 7 | `about` | `stacked` | content | About {client} |
-| 8 | `stats` | `tiles` | chrome | By the numbers |
-| 9 | `cta` | `banner` | content | Get started |
+| 7 | `cta` | `banner` | content | Get started |
+
+## About page  (`template=about`)
+
+Default for page type: `service`. Story first, values as a grid, people and numbers only when they are real.
+
+| # | kind | layout | role | heading |
+|---|------|--------|------|---------|
+| 1 | `hero` | `split` | content | About {client} |
+| 2 | `intro` | `stacked` | content | Why we exist |
+| 3 | `benefits` | `grid` | content | What we stand for |
+| 4 | `process` | `numbered-steps` | content | How we work |
+| 5 | `team` | `cards` | content | The people behind {client} |
+| 6 | `stats` | `tiles` | content | By the numbers |
+| 7 | `cta` | `banner` | content | Work with {client} |

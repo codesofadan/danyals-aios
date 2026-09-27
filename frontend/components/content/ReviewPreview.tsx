@@ -11,19 +11,22 @@
 //   (c) SCHEMA    — the JSON-LD block, pretty-printed  (…/schema)
 //   (d) OUTLINE   — H1/H2/H3 structure + keyword + internal-link coverage
 //                   (headings parsed from the draft; …/keywords + …/links)
-//   (e) QA        — the 14-dimension scorecard, pass/fail per dimension (…/qa)
+//   (e) CHECKS    — the named problems the deterministic checks found (…/review-flags).
+//                   NOT the 14-dimension score: the operator's 2026-09-26 decision is that
+//                   an uncalibrated total must not be put in front of a reviewer.
 // Plus an "Request edit" action that sends the edit action + a free-text
 // instruction note to POST /content/{code}/review (the GUIDED-EDIT flow).
 // ============================================================
 
 import { useState } from "react";
 import {
+  useReviewFlags,
+  type ReviewFlag,
   useContentDraft,
   useContentSchema,
   useContentOutline,
   useContentKeywords,
   useContentLinks,
-  useContentQa,
   useContentWp,
 } from "@/lib/hooks/content";
 import type { ContentJob } from "@/lib/content";
@@ -110,13 +113,15 @@ const TABS = [
   { key: "meta", label: "Meta", icon: "title" },
   { key: "schema", label: "Schema", icon: "data_object" },
   { key: "outline", label: "Outline & coverage", icon: "format_list_bulleted" },
-  { key: "qa", label: "QA scorecard", icon: "fact_check" },
+  // NOT "QA scorecard". The weighted total is no longer shown to a reviewer (operator's
+  // decision, 2026-09-26): its own module declares the threshold uncalibrated, so the
+  // number reads like a verdict it cannot support. What this tab shows now is what the
+  // deterministic checks actually FOUND, which was never provisional.
+  { key: "qa", label: "Checks", icon: "fact_check" },
 ] as const;
 type TabKey = (typeof TABS)[number]["key"];
 
 // A QA dimension passes at/above the doctrine per-dimension floor (70).
-const QA_FLOOR = 70;
-const prettyDim = (d: string) => d.replace(/_/g, " ");
 
 export default function ReviewPreview({
   job, onAction, onClose, hideActions = false, canReview = true,
@@ -142,7 +147,8 @@ export default function ReviewPreview({
   const outlineQ = useContentOutline(job.id);
   const keywordsQ = useContentKeywords(job.id);
   const linksQ = useContentLinks(job.id);
-  const qaQ = useContentQa(job.id);
+  // The review signal is the named problems, not the scorecard: see ChecksTab below.
+  const flagsQ = useReviewFlags(job.id);
   // Only fetch the WordPress push URLs once the job reports it was pushed to the
   // plugin (its live-polled stage flips to "Pushed to WordPress..."), so this never
   // fetches for a job that will never be pushed.
@@ -178,7 +184,6 @@ export default function ReviewPreview({
   const heads = headingsFromMd(md);
   const kw = keywordsQ.data?.keywords ?? null;
   const links = linksQ.data?.links?.links ?? [];
-  const qa = qaQ.data?.qa ?? null;
 
   function sendEdit() {
     const instruction = note.trim();
@@ -409,9 +414,13 @@ export default function ReviewPreview({
         </div>
       )}
 
-      {/* (e) QA SCORECARD — pass/fail per dimension incl. schema validity */}
+      {/* (e) CHECKS — the named problems a machine can find in this draft */}
       {tab === "qa" && (
-        <QaTab loading={qaQ.isLoading} error={qaQ.error as Error | null} qa={qa} />
+        <ChecksTab
+          loading={flagsQ.isLoading}
+          error={flagsQ.error as Error | null}
+          flags={flagsQ.data?.flags ?? []}
+        />
       )}
 
       {/* Review actions (only meaningful while the job awaits review). Hidden when
@@ -561,78 +570,65 @@ function SchemaTab({ loading, error, data, fallbackType }: {
   );
 }
 
-function QaTab({ loading, error, qa }: {
-  loading: boolean; error: Error | null;
-  qa: { dimensions: Record<string, number>; weighted_total: number; passed: boolean;
-    blocked_by: string[]; provisional: boolean; notes?: string[] } | null;
+function ChecksTab({ loading, error, flags }: {
+  loading: boolean; error: Error | null; flags: ReviewFlag[];
 }) {
-  if (loading) return <div className="co-gate-empty"><span className="material-symbols-rounded">hourglass_top</span><div>Loading QA…</div></div>;
-  if (error) return <div className="co-gate-empty" role="alert"><span className="material-symbols-rounded">error</span><div>Couldn&apos;t load the QA scorecard — {error.message}.</div></div>;
-  if (!qa || Object.keys(qa.dimensions ?? {}).length === 0) {
-    return <div className="co-gate-empty"><span className="material-symbols-rounded">fact_check</span><div>No QA scorecard yet — it is attached when the draft reaches review.</div></div>;
+  if (loading) {
+    return (
+      <div className="co-gate-empty">
+        <span className="material-symbols-rounded">hourglass_top</span>
+        <div>Checking the draft…</div>
+      </div>
+    );
   }
-  const dims = Object.entries(qa.dimensions);
+  if (error) {
+    return (
+      <div className="co-gate-empty" role="alert">
+        <span className="material-symbols-rounded">error</span>
+        <div>Couldn&apos;t run the checks — {error.message}.</div>
+      </div>
+    );
+  }
+  if (flags.length === 0) {
+    // A clean draft says so. Saying nothing would be indistinguishable from a tab that
+    // failed to load, which is the shape that let a broken QA tab look like a pass.
+    return (
+      <div className="co-gate-empty">
+        <span className="material-symbols-rounded" style={{ color: "var(--ok)" }}>
+          check_circle
+        </span>
+        <div>Nothing flagged in this draft.</div>
+        <div className="cs">
+          These are the checks a machine can make — an ungrounded claim, a missing
+          first-hand signal, structured data that does not match the page. Your read is
+          still the gate.
+        </div>
+      </div>
+    );
+  }
+  const problems = flags.filter((f) => f.kind === "problem");
   return (
     <div>
-      {/* Headline verdict */}
-      <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: 12 }}>
-        {/* ADVISORY, not enforced. `PublishBlocked` is raised nowhere in the worker and
-            `publish_content_job` publishes regardless of this score - the only real
-            boundary is the human gate below. Wording that implied a gate would have
-            told the reviewer a machine was catching what is in fact their job. */}
-        <span className={`pill-tag ${qa.passed ? "ok" : "warn"}`}>
-          <span className="material-symbols-rounded">{qa.passed ? "check_circle" : "gpp_maybe"}</span>
-          {qa.passed ? "Meets the quality bar" : "Below the quality bar"}
-        </span>
-        <span className="pill-tag">
-          {Number.isFinite(qa.weighted_total)
-            ? <><strong>{qa.weighted_total}</strong>&nbsp;/ 100 weighted</>
-            : <strong>not scored</strong>}
-        </span>
-        {qa.provisional && <span className="pill-tag" style={{ opacity: 0.8 }}>provisional weights</span>}
-        <span className="cs" style={{ flexBasis: "100%" }}>
-          Advisory — this score does not block publishing. Your approval does.
-        </span>
+      <div className="cs" style={{ marginBottom: 12 }}>
+        {problems.length > 0
+          ? `${problems.length} thing${problems.length === 1 ? "" : "s"} worth sending back for`
+          : "Nothing serious — a few things to look at"}
+        . No score: the automated total was never calibrated against a human grade, so it
+        is not shown. What is below is what was actually found.
       </div>
-
-      {qa.blocked_by.length > 0 && (
-        <div role="alert" style={{ marginBottom: 12, padding: "8px 12px", borderRadius: 10,
-          background: "rgba(192,57,43,0.10)", border: "1px solid rgba(192,57,43,0.35)", fontSize: 13 }}>
-          Hard-blocked by: {qa.blocked_by.map(prettyDim).join(", ")}
+      {flags.map((f) => (
+        <div
+          key={f.key}
+          style={{
+            marginBottom: 10, padding: "10px 12px", borderRadius: 10,
+            border: "1px solid var(--line, #e8d2d7)",
+            borderLeft: `4px solid ${f.kind === "problem" ? "var(--crit, #C0392B)" : "var(--warn, #A96913)"}`,
+          }}
+        >
+          <div style={{ fontWeight: 700, fontSize: 13.5 }}>{f.title}</div>
+          <div className="cs" style={{ marginTop: 3 }}>{f.detail}</div>
         </div>
-      )}
-
-      {/* Per-dimension grid */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: 8 }}>
-        {dims.map(([dim, sc]) => {
-          const pass = sc >= QA_FLOOR;
-          return (
-            <div key={dim} style={{ display: "flex", justifyContent: "space-between", alignItems: "center",
-              gap: 8, padding: "8px 12px", borderRadius: 10, border: "1px solid var(--line, #e8d2d7)" }}>
-              <span style={{ fontSize: 13, textTransform: "capitalize" }}>{prettyDim(dim)}</span>
-              <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontWeight: 700, fontSize: 13,
-                color: pass ? "#12b48f" : "var(--warn, #C0392B)" }}>
-                <span className="material-symbols-rounded" style={{ fontSize: 16 }}>
-                  {pass ? "check_circle" : "cancel"}
-                </span>{sc}
-              </span>
-            </div>
-          );
-        })}
-      </div>
-
-      {/* `qa_score` is a jsonb column: its shape is whatever the engine that wrote
-          it happened to include, not a contract. The doctrine engine omitted
-          `notes`, so this threw a TypeError and took the whole QA tab down on
-          every page it drafted. Read defensively. */}
-      {(qa.notes ?? []).length > 0 && (
-        <details style={{ marginTop: 12 }}>
-          <summary className="cs" style={{ cursor: "pointer" }}>Why ({(qa.notes ?? []).length} note{(qa.notes ?? []).length === 1 ? "" : "s"})</summary>
-          <ul style={{ margin: "8px 0 0", paddingLeft: 20, fontSize: 13, opacity: 0.85 }}>
-            {(qa.notes ?? []).map((n, i) => <li key={i}>{n}</li>)}
-          </ul>
-        </details>
-      )}
+      ))}
     </div>
   );
 }

@@ -214,6 +214,55 @@ receiving impressions for these queries" — the only honest proof the content m
 **Rejected:** GSC as the rankings source (it is an average, which is exactly why v1's
 documents flagged the two as different).
 
+## ADR-022 ✅ The AI stack lands in the v1 tree first, starting with Web 2.0
+
+**Decision:** build `platform/ai` (model router, LangGraph runtime, LangSmith tracing,
+prompt registry) **inside the running v1 backend** as `app/platform/ai/`, and convert one
+module to it — Web 2.0's `campaign_content` — before any other.
+**Why:** ADR-001 rebuilds greenfield, but the AI stack is the one layer whose value does not
+depend on the rebuild landing. It is additive (nothing in `app/services` changes because it
+exists), it pays for itself immediately (v1 drafts a 30-property campaign with no checkpoint,
+no trace and no tier routing), and converting one module proves the contracts against real
+work rather than against a document. Web 2.0 is the right first module because its drafting
+stage fans out a dozen model calls per property and persists nothing until the end — the
+exact shape checkpointing exists for.
+**Rejected:** waiting for the v2 skeleton (the stack would be designed against no caller, and
+v1 keeps double-billing interrupted campaigns in the meantime); a shim that only wraps the
+existing writer (no checkpoint, no resumption — the reason for adopting LangGraph at all).
+**Constraint:** `platform/` may never import a module (`03-ARCHITECTURE.md` §5 rule 4), which
+holds here, so the package ports to v2 unchanged.
+
+## ADR-023 ✅ LangGraph for orchestration, our own router for the model call
+
+**Decision:** LangGraph owns multi-step graph state; every model call goes through
+`ModelRouter` over the **official Anthropic SDK**. `langchain` itself is not a dependency.
+**Why:** LangGraph is adopted for one property — checkpointed, resumable state — which
+composes with the job engine (the job owns the lifecycle, the graph owns the reasoning
+state). LangChain's chat-model abstraction lags the Anthropic API on exactly the features
+that matter here: adaptive thinking, `output_config.effort`, cache-breakpoint placement,
+strict tool schemas.
+**Rejected:** LangChain's chat models in the hot path (the lag becomes ours permanently);
+hand-rolled checkpointing (re-implementing resumable state is the one thing LangGraph is
+worth taking a dependency for).
+**Enforcement:** both packages are an optional `[graph]` extra, lazy-imported, and a
+deployment without them degrades to the linear path rather than failing — the base image
+stays light, which is a live constraint (heavy AI trees have broken this build's dependency
+resolution before).
+
+## ADR-024 ✅ A missing backend capability blocks the judge, and is recorded everywhere else
+
+**Decision:** when the configured backend cannot honour a tier's declared configuration, the
+`reasoning` and `judge` tiers **raise** `CapabilityMissingError`; `drafting`, `structured`
+and `bulk` proceed and record the degradation on the result, the log line and the trace.
+**Why:** `06-AI-STACK.md` §3 forbids a backend change altering output quality *silently* —
+silence is the thing being ruled out, not degradation. A judge that cannot think is a
+different grader, so an eval calibrated against one says nothing about the other; a drafting
+call that cannot set `effort` is the same article written slightly differently.
+**Rejected:** blocking every tier (this deployment's live backend is an OpenAI-compatible
+proxy, so all work would stop to enforce a preference); recording every tier (an
+uninterpretable grade is worse than a refusal, and evals built on one would be meaningless).
+**Escape hatch:** `ai_router_strict_tiers=false` moves the line, deliberately and visibly.
+
 ---
 
 ## Defaults for decisions this pack does not cover

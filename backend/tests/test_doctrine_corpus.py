@@ -53,7 +53,7 @@ _KNOWN_THIRD_PARTY: list[str] = [
 def _imported_roots(path: pathlib.Path) -> set[str]:
     """Top-level module names imported by ``path`` (absolute imports only)."""
     roots: set[str] = set()
-    for node in ast.walk(ast.parse(path.read_text(), filename=str(path))):
+    for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"), filename=str(path))):
         if isinstance(node, ast.Import):
             roots.update(a.name.split(".")[0] for a in node.names)
         elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
@@ -67,7 +67,7 @@ def manifest() -> dict:
         f"{_MANIFEST} is missing. The doctrine corpus must be extracted into the repo "
         "(research item R6-1), not left inside SEO-CONTENT-OS.zip."
     )
-    return json.loads(_MANIFEST.read_text())
+    return json.loads(_MANIFEST.read_text(encoding="utf-8"))
 
 
 # --------------------------------------------------------------------------- #
@@ -86,7 +86,7 @@ def test_the_path_the_code_cites_actually_exists() -> None:
             if "__pycache__" in path.parts:
                 continue
             cited.update(
-                re.findall(r"backend/seo-content-os/[A-Za-z0-9_./-]+", path.read_text())
+                re.findall(r"backend/seo-content-os/[A-Za-z0-9_./-]+", path.read_text(encoding="utf-8"))
             )
 
     assert cited, "no source file cites the doctrine corpus any more - did a path change?"
@@ -97,6 +97,24 @@ def test_the_path_the_code_cites_actually_exists() -> None:
 # --------------------------------------------------------------------------- #
 # 2 - the corpus has not drifted from what the constants were derived from
 # --------------------------------------------------------------------------- #
+def _content_sha256(path: pathlib.Path) -> str:
+    """The file's hash over its CONTENT, with line endings normalised to LF.
+
+    MANIFEST.json records LF hashes (it was generated where the corpus is stored with
+    LF). Git rewrites line endings on checkout under `core.autocrlf`, so on a Windows
+    working tree every text file's raw bytes differ from the manifest while its content
+    is byte-identical - measured: all 160 files mismatched raw, and all 160 matched
+    after CRLF->LF. Hashing the raw bytes therefore reported the entire doctrine corpus
+    as "edited since extraction" on every Windows run.
+
+    Normalising here rather than regenerating the manifest is deliberate: regenerating
+    would bake THIS checkout's line endings into the recorded hashes and move the same
+    false failure onto every LF platform, including CI. The gate's real question is
+    whether the doctrine's content changed, and that is what this answers.
+    """
+    return hashlib.sha256(path.read_bytes().replace(b"\r\n", b"\n")).hexdigest()
+
+
 def test_every_manifest_file_is_present_and_unmodified(manifest: dict) -> None:
     missing: list[str] = []
     changed: list[str] = []
@@ -105,7 +123,7 @@ def test_every_manifest_file_is_present_and_unmodified(manifest: dict) -> None:
         if not path.is_file():
             missing.append(rel)
             continue
-        if hashlib.sha256(path.read_bytes()).hexdigest() != rec["sha256"]:
+        if _content_sha256(path) != rec["sha256"]:
             changed.append(rel)
 
     assert not missing, f"doctrine files deleted since extraction: {missing}"
@@ -216,7 +234,7 @@ def test_the_offline_validators_are_present_and_parse() -> None:
 
     for path in scripts:
         try:
-            ast.parse(path.read_text(), filename=str(path))
+            ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         except SyntaxError as exc:  # pragma: no cover - a corrupt extraction
             pytest.fail(f"{path.name} does not parse: {exc}")
 
@@ -294,7 +312,7 @@ def test_the_corpus_is_packaged_into_the_wheel() -> None:
     except ModuleNotFoundError:  # pragma: no cover - py<3.11
         pytest.skip("tomllib unavailable")
 
-    cfg = tomllib.loads((_BACKEND / "pyproject.toml").read_text())
+    cfg = tomllib.loads((_BACKEND / "pyproject.toml").read_text(encoding="utf-8"))
     wheel = cfg["tool"]["hatch"]["build"]["targets"]["wheel"]
     included = wheel.get("force-include", {})
 

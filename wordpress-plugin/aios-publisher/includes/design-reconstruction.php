@@ -99,14 +99,29 @@ function aios_publisher_localize_elementor_images( $post_id, &$tree ) {
 	$localized = 0;
 	$budget    = AIOS_PUBLISHER_MAX_TREE_IMAGES;
 
-	$visit = function ( &$node ) use ( &$visit, &$seen, &$localized, &$budget, $post_id ) {
+	// AN IMAGE ALREADY ON THIS SITE IS NOT SIDELOADED. It is already ours, and
+	// re-importing it would create a duplicate attachment - on EVERY delivery.
+	//
+	// That was harmless while this ran only on the single-page publish path, which
+	// creates a new post each time. It is not harmless on the whole-site `/site`
+	// route, which is deliberately idempotent and re-run for things like a navigation
+	// rebuild: without this guard, each rebuild would import a fresh copy of every
+	// image on every page and grow the client's media library without bound. A local
+	// URL still matches `^https?://`, so the scheme test alone does not catch it.
+	$own_host = wp_parse_url( home_url(), PHP_URL_HOST );
+	$own_host = is_string( $own_host ) ? strtolower( $own_host ) : '';
+
+	$visit = function ( &$node ) use ( &$visit, &$seen, &$localized, &$budget, $post_id, $own_host ) {
 		if ( ! is_array( $node ) ) {
 			return;
 		}
 		// An Elementor image value: an array carrying a 'url' that points off-site.
 		if ( isset( $node['url'] ) && is_string( $node['url'] ) && array_key_exists( 'id', $node ) ) {
-			$url = $node['url'];
-			if ( ! isset( $seen[ $url ] ) && $budget > 0 && preg_match( '#^https?://#i', $url ) ) {
+			$url       = $node['url'];
+			$url_host  = wp_parse_url( $url, PHP_URL_HOST );
+			$url_host  = is_string( $url_host ) ? strtolower( $url_host ) : '';
+			$is_ours   = ( '' !== $own_host && $url_host === $own_host );
+			if ( ! $is_ours && ! isset( $seen[ $url ] ) && $budget > 0 && preg_match( '#^https?://#i', $url ) ) {
 				--$budget;
 				$seen[ $url ] = false;
 				$attachment_id = media_sideload_image( esc_url_raw( $url ), $post_id, null, 'id' );
@@ -183,10 +198,69 @@ function aios_publisher_sanitize_css( $css ) {
  * @return void
  */
 function aios_publisher_store_design_css( $post_id, $request ) {
-	$css = aios_publisher_sanitize_css( (string) $request->get_param( 'design_css' ) );
-	if ( '' !== $css ) {
-		update_post_meta( $post_id, AIOS_PUBLISHER_META_DESIGN_CSS, wp_slash( $css ) );
+	aios_publisher_apply_design_css( $post_id, (string) $request->get_param( 'design_css' ) );
+	aios_publisher_store_design_fonts( $post_id, $request->get_param( 'design_fonts' ) );
+}
+
+/**
+ * Sanitize + store the TYPEFACE NAMES the pushed design CSS asks for.
+ *
+ * WHY THIS EXISTS. The design CSS names its families (`font-family: Poppins, …`) and that
+ * is not the same as the site HAVING them: on a site that never loaded Poppins the page
+ * renders in whatever comes next in the stack, which is normally the theme's font. The
+ * page then looks nothing like the design it was built from and nothing reports a
+ * problem, because the CSS is exactly right. Storing the names lets the front end load
+ * them from Google Fonts (see aios_publisher_enqueue_design_fonts).
+ *
+ * Names are restricted to letters, digits, spaces and hyphens - which is every real
+ * family name and nothing that could escape a URL - and capped at eight.
+ *
+ * @param int   $post_id  The created post id.
+ * @param mixed $families Caller-supplied list of family names.
+ * @return void
+ */
+function aios_publisher_store_design_fonts( $post_id, $families ) {
+	if ( ! is_array( $families ) ) {
+		return;
 	}
+	$clean = array();
+	foreach ( $families as $family ) {
+		if ( ! is_string( $family ) ) {
+			continue;
+		}
+		$name = trim( preg_replace( '/[^A-Za-z0-9 \-]/', '', $family ) );
+		if ( '' !== $name && ! in_array( $name, $clean, true ) ) {
+			$clean[] = $name;
+		}
+		if ( count( $clean ) >= 8 ) {
+			break;
+		}
+	}
+	if ( empty( $clean ) ) {
+		return; // Never blank a stored list: a push that carries no fonts is not a reset.
+	}
+	update_post_meta( $post_id, AIOS_PUBLISHER_META_DESIGN_FONTS, $clean );
+}
+
+/**
+ * Sanitize + store design CSS from a raw value (the `/site` route's per-page form).
+ *
+ * The request-taking wrapper above is kept as-is because it is on the shipped
+ * single-page publish path; this is the same write, reachable with a plain string so
+ * the whole-site route can perform it too. Empty -> nothing stored, never blanked: a
+ * structural re-delivery that carries no CSS must not strip the styling off a page.
+ *
+ * @param int    $post_id Target post.
+ * @param string $css     Raw CSS text (no <style> wrapper).
+ * @return bool Whether CSS was stored.
+ */
+function aios_publisher_apply_design_css( $post_id, $css ) {
+	$css = aios_publisher_sanitize_css( (string) $css );
+	if ( '' === $css ) {
+		return false;
+	}
+	update_post_meta( $post_id, AIOS_PUBLISHER_META_DESIGN_CSS, wp_slash( $css ) );
+	return true;
 }
 /**
  * Write the Elementor builder post-meta when the push carried an Elementor widget TREE.
@@ -204,19 +278,44 @@ function aios_publisher_store_design_css( $post_id, $request ) {
  * @return void
  */
 function aios_publisher_store_elementor_data( $post_id, $request ) {
-	$data = (string) $request->get_param( 'elementor_data' );
+	aios_publisher_apply_elementor_tree(
+		$post_id,
+		(string) $request->get_param( 'elementor_data' ),
+		(string) $request->get_param( 'elementor_edit_mode' ),
+		(string) $request->get_param( 'template' )
+	);
+}
+
+/**
+ * Write an Elementor widget tree onto a post, from raw values.
+ *
+ * THE ONE IMPLEMENTATION. `site-assembler.php` carried its own copy of this, written
+ * from the same four `update_post_meta` calls but WITHOUT the image-localization pass
+ * — so a page delivered through `/site` kept rendering its imagery from whatever
+ * server the source tree pointed at, while the identical page pushed through
+ * `/publish` had every image imported into the client's own media library. Two copies
+ * of a write is how that divergence happened, so there is now one.
+ *
+ * @param int    $post_id   Target post.
+ * @param string $data      The `_elementor_data` JSON (a top-level array of sections).
+ * @param string $edit_mode Elementor edit mode; anything but 'builder' becomes 'builder'.
+ * @param string $template  'elementor_canvas' | 'elementor_header_footer' (else the latter).
+ * @return bool Whether a tree was written.
+ */
+function aios_publisher_apply_elementor_tree( $post_id, $data, $edit_mode = 'builder', $template = '' ) {
+	$data = (string) $data;
 	if ( '' === trim( $data ) || ! aios_publisher_is_valid_json( $data ) ) {
-		return;
+		return false;
 	}
 	$decoded = json_decode( $data, true );
 	// Elementor's _elementor_data is a JSON ARRAY of top-level sections; a non-array (or
 	// empty) payload is not a valid tree, so skip it and leave a normal post.
 	if ( ! is_array( $decoded ) || empty( $decoded ) ) {
-		return;
+		return false;
 	}
 
 	// Constrain the edit mode to the safe set; default to Elementor's "builder".
-	$edit_mode = sanitize_key( (string) $request->get_param( 'elementor_edit_mode' ) );
+	$edit_mode = sanitize_key( (string) $edit_mode );
 	if ( 'builder' !== $edit_mode ) {
 		$edit_mode = 'builder';
 	}
@@ -245,9 +344,10 @@ function aios_publisher_store_elementor_data( $post_id, $request ) {
 	// footer as page sections, and the theme's chrome must not double up around
 	// them - that is `elementor_canvas`. Anything outside the safe set falls back
 	// to the header/footer template this plugin has always written.
-	$template = sanitize_text_field( (string) $request->get_param( 'template' ) );
+	$template = sanitize_text_field( (string) $template );
 	if ( ! in_array( $template, array( 'elementor_canvas', 'elementor_header_footer' ), true ) ) {
 		$template = 'elementor_header_footer';
 	}
 	update_post_meta( $post_id, '_wp_page_template', $template );
+	return true;
 }

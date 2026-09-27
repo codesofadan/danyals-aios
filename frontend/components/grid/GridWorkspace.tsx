@@ -19,6 +19,8 @@
 import { useState } from "react";
 import {
   useCreateGrid,
+  usePreviewMapsUrl,
+  type MapsUrlPreview,
   useGridClients,
   useGridDefinitions,
   useGridLatest,
@@ -315,6 +317,7 @@ export default function GridWorkspace() {
 
 function CreateGridCard() {
   const create = useCreateGrid();
+  const preview = usePreviewMapsUrl();
   const clientsQ = useGridClients();
   const clients = clientsQ.data ?? [];
   const [clientId, setClientId] = useState("");
@@ -323,10 +326,41 @@ function CreateGridCard() {
   const [spacing, setSpacing] = useState(1.5);
   const [lat, setLat] = useState("");
   const [lng, setLng] = useState("");
+  const [mapsUrl, setMapsUrl] = useState("");
+  const [resolved, setResolved] = useState<MapsUrlPreview | null>(null);
+  const [mapsError, setMapsError] = useState("");
+  const [syncNap, setSyncNap] = useState(false);
   const [error, setError] = useState("");
 
   const manualCentre = lat.trim() !== "" || lng.trim() !== "";
   const selected = clients.find((c) => c.id === clientId);
+
+  /** Resolve the pasted link and SHOW it. Nothing is created by this. */
+  async function checkMapsUrl() {
+    setMapsError("");
+    setResolved(null);
+    setSyncNap(false);
+    const value = mapsUrl.trim();
+    if (!value) return;
+    try {
+      setResolved(await preview.mutateAsync(value));
+    } catch (err) {
+      // The server's 422 detail is written for the operator — it names what to paste
+      // instead — so it is shown verbatim rather than replaced with a generic line.
+      const message = err instanceof Error ? err.message : "";
+      setMapsError(
+        message.replace(/^\d+\s*:?\s*/, "") ||
+          "That link could not be read. Open the business on Google Maps, press Share, and paste the link it gives you.",
+      );
+    }
+  }
+
+  function clearMapsUrl() {
+    setMapsUrl("");
+    setResolved(null);
+    setMapsError("");
+    setSyncNap(false);
+  }
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -338,11 +372,18 @@ function CreateGridCard() {
         shape: "square",
         gridSize,
         ringSpacingKm: spacing,
-        ...(manualCentre ? { centerLat: Number(lat), centerLng: Number(lng) } : {}),
+        // A confirmed link wins over typed coordinates; the server enforces the same
+        // precedence, so the two cannot disagree about which centre was used.
+        ...(resolved
+          ? { mapsUrl: mapsUrl.trim(), syncNap }
+          : manualCentre
+            ? { centerLat: Number(lat), centerLng: Number(lng) }
+            : {}),
       });
       setKeyword("");
       setLat("");
       setLng("");
+      clearMapsUrl();
     } catch (err) {
       const message = err instanceof Error ? err.message : "";
       setError(
@@ -416,28 +457,116 @@ function CreateGridCard() {
           />
         </label>
 
+        {/* THE ACCURATE PATH. Searching for a business by name is what centres a grid
+            on a same-named shop in another country; a pasted link names the listing the
+            operator already found with their own eyes, so there is nothing to guess. */}
+        <label className="gw-field gw-field-wide">
+          <span>Google Maps link (most accurate)</span>
+          <div className="gw-paste">
+            <input
+              value={mapsUrl}
+              onChange={(e) => { setMapsUrl(e.target.value); setResolved(null); setMapsError(""); }}
+              placeholder="Paste the Share link from the business on Google Maps"
+              inputMode="url"
+            />
+            <button
+              type="button"
+              className="ghostbtn"
+              onClick={checkMapsUrl}
+              disabled={preview.isPending || mapsUrl.trim() === ""}
+            >
+              {preview.isPending ? "Checking…" : "Check"}
+            </button>
+            {(resolved || mapsError) && (
+              <button type="button" className="ghostbtn" onClick={clearMapsUrl}>
+                Clear
+              </button>
+            )}
+          </div>
+        </label>
+
+        {mapsError && (
+          <div className="sec-note gw-field-wide">
+            <span className="material-symbols-rounded">error</span>
+            <span>{mapsError}</span>
+          </div>
+        )}
+
+        {resolved && (
+          <div className="gw-picked gw-field-wide">
+            <div className="gw-picked-t">
+              {resolved.identityVerified ? resolved.name : "Location found — business not identified"}
+            </div>
+            <div className="gw-picked-s">
+              {resolved.identityVerified ? (
+                <>
+                  {resolved.address}
+                  {resolved.phone ? ` · ${resolved.phone}` : ""}
+                  <br />
+                  Centre {resolved.lat.toFixed(6)}, {resolved.lng.toFixed(6)} — taken from
+                  this listing&apos;s own pin. Check it is the right business before creating
+                  the grid.
+                </>
+              ) : (
+                <>
+                  Centre {resolved.lat.toFixed(6)}, {resolved.lng.toFixed(6)}
+                  {resolved.precise
+                    ? " — the pin from the link."
+                    : " — the map view in the link, not a business pin, so it may be off by a street."}
+                  <br />
+                  {resolved.reason === "no_places_key"
+                    ? "The business details could not be looked up (no Places key configured), so only the coordinates are being used."
+                    : resolved.reason === "match_too_far"
+                      ? "Google returned a business too far from this pin to be the same place, so it was rejected rather than guessed at. The pin itself is still used as the centre."
+                      : "The business behind this link could not be looked up, so only the coordinates are being used."}
+                </>
+              )}
+            </div>
+
+            {/* Offered ONLY on a verified identity: writing unknown details to the
+                record the citation module submits from would be the worst possible
+                reading of a convenience. */}
+            {resolved.identityVerified && (
+              <label className="gw-check">
+                <input
+                  type="checkbox"
+                  checked={syncNap}
+                  onChange={(e) => setSyncNap(e.target.checked)}
+                />
+                <span>
+                  Also update this client&apos;s saved business details from this listing.
+                  This is the NAP submitted to directories — only the fields Google
+                  returned are written, and nothing is blanked out.
+                </span>
+              </label>
+            )}
+          </div>
+        )}
+
         {/* The override, not the default. Present because a client with no business
             profile - or one whose listing resolves to the wrong city - still needs a
             way through, and an honest escape hatch beats a blocked form. */}
         <label className="gw-field">
           <span>Centre latitude (optional)</span>
           <input value={lat} onChange={(e) => setLat(e.target.value)}
-                 placeholder="resolved from the client" />
+                 placeholder={resolved ? "using the Maps link" : "resolved from the client"}
+                 disabled={Boolean(resolved)} />
         </label>
         <label className="gw-field">
           <span>Centre longitude (optional)</span>
           <input value={lng} onChange={(e) => setLng(e.target.value)}
-                 placeholder="resolved from the client" />
+                 placeholder={resolved ? "using the Maps link" : "resolved from the client"}
+                 disabled={Boolean(resolved)} />
         </label>
 
-        {selected && (
+        {selected && !resolved && (
           <div className="gw-picked">
             <div className="gw-picked-t">{selected.cn}</div>
             <div className="gw-picked-s">
               The location and map centre will be resolved from this client&apos;s
               business profile when you create the grid — check the centre on the board
               afterwards, because a listing search can match a same-named business
-              elsewhere.
+              elsewhere. Pasting the Maps link above skips that search entirely.
             </div>
           </div>
         )}

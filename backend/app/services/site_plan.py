@@ -28,7 +28,7 @@ THREE THINGS IT REFUSES TO DO, because it writes to a live site:
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 # WordPress collapses a slug to lowercase alphanumerics and hyphens. Doing it here means
@@ -39,33 +39,149 @@ _SLUG_STRIP = re.compile(r"[^a-z0-9]+")
 
 MAX_MENU_DEPTH = 2
 
+#: Page types that publish as a WordPress ``post`` (long-form prose at a narrow
+#: reading measure); everything else is a landing ``page``.
+#:
+#: ONE definition, imported by ``workers.tasks.content`` (which decides the post type
+#: at publish) and by ``site_navigation`` (which has to name the same type again when
+#: it re-delivers that page structurally). It lived only in the worker, so the site
+#: route had no way to know a blog article is a `post` - it looked every page up as a
+#: `page`, missed the article entirely, and created an empty duplicate beside it.
+ARTICLE_PAGE_TYPES: frozenset[str] = frozenset({"blog", "faq"})
+
+
+def post_type_for_page_type(page_type: str) -> str:
+    """The WordPress post type a content job of this page type publishes as.
+
+    A FALLBACK, not the authority: when the platform knows the page's ``wp_post_id``
+    it addresses the post directly and this is not consulted. It matters only for a
+    page we have an URL for but no id - and getting it right there is the difference
+    between updating the client's article and creating an empty page beside it.
+    """
+    return "post" if str(page_type or "").strip().lower() in ARTICLE_PAGE_TYPES else "page"
+
 
 def slugify(value: str) -> str:
     """The slug WordPress will actually store for this title."""
     return _SLUG_STRIP.sub("-", (value or "").strip().lower()).strip("-")
 
 
+def _opt_str(value: Any) -> str | None:
+    """``None`` for an absent value, the string for anything present - INCLUDING "".
+
+    The distinction is load-bearing for ``PlannedPage.content``: absent means "leave
+    the live page's body alone", and "" means "this page has no body".
+    """
+    return None if value is None else str(value)
+
+
+def _opt_int(value: Any) -> int | None:
+    """A positive int, or None. A 0 / blank / unparseable id is no id."""
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed > 0 else None
+
+
+def _post_type(value: Any) -> str:
+    """``page`` unless the caller explicitly named ``post``.
+
+    Constrained here rather than trusted: these are the only two types the plugin
+    accepts, and defaulting to ``page`` keeps every existing caller unchanged.
+    """
+    return "post" if str(value or "").strip().lower() == "post" else "page"
+
+
 @dataclass(frozen=True)
 class PlannedPage:
-    """One page in the site, with where it sits and whether it is navigable."""
+    """One page in the site, with where it sits and whether it is navigable.
+
+    ``content is None`` MEANS "LEAVE THE BODY ALONE", and that distinction is the
+    whole point of the type. It used to be ``content: str = ""``, and the navigation
+    rebuild - which knows slugs and hierarchy and nothing about page bodies - sent
+    every page with the default. The plugin wrote ``post_content`` unconditionally,
+    so rebuilding the navbar BLANKED the body of every page it touched. An empty
+    string is a legitimate instruction ("this page has no body"); absence is a
+    different instruction, and only a nullable field can carry both.
+
+    Every SEO field is likewise "" = absent = do not touch. A structural delivery
+    sends none of them; a content delivery sends the ones it actually measured. The
+    site route previously had no way to carry ANY of them, so a page delivered
+    through it arrived with no SEO title, no description, no schema - while the same
+    page pushed one at a time through ``/publish`` got all three.
+    """
 
     slug: str
     title: str
-    content: str = ""
+    content: str | None = None
     elementor_data: str = ""
     template: str = ""
     parent_slug: str = ""
     menu_order: int = 0
     in_menu: bool = True
     is_front_page: bool = False
+    #: The WordPress post this page ALREADY is, when the platform knows it (a content
+    #: job records ``wp_post_id`` at publish). Targeting the post by ID is strictly
+    #: better than matching by slug: slug matching cannot see a page whose post_type
+    #: differs (a blog article is a `post`, and `get_page_by_path(..., 'page')` misses
+    #: it), so a re-delivery created an empty DUPLICATE and pointed the menu at that
+    #: instead of the real article.
+    post_id: int | None = None
+    #: What WordPress object this is. Only `page` is hierarchical, so a `post` takes
+    #: its nesting from the MENU alone (`post_parent` is meaningless on it).
+    post_type: str = "page"
+    #: Whether ``content`` is a SEED rather than an authority - write it when creating
+    #: the page, never over a body that already exists. The auto-created family hub is
+    #: the case: its "Explore our services." placeholder must not overwrite the real
+    #: landing copy an operator wrote on it the first time, and a re-delivery would
+    #: otherwise do exactly that on every nav rebuild.
+    content_only_if_new: bool = False
+    # ----- SEO / presentation. All optional; "" means "do not touch". ----------
+    meta_title: str = ""
+    meta_description: str = ""
+    focus_keyword: str = ""
+    schema_jsonld: str = ""
+    og_title: str = ""
+    og_description: str = ""
+    og_image_url: str = ""
+    twitter_card: str = ""
+    design_css: str = ""
+    featured_image_url: str = ""
+    full_width: bool = False
 
     def payload(self) -> dict[str, Any]:
-        return {
-            "slug": self.slug, "title": self.title, "content": self.content,
+        """The page as the plugin's `/site` route receives it.
+
+        EMPTY FIELDS ARE OMITTED, not sent as blanks. Two reasons, and both are about
+        writing to a live site: a plugin older than these fields ignores keys it does
+        not know either way, and a plugin that DOES know them must be able to tell
+        "no instruction" from "set this to nothing" - otherwise a structural
+        re-delivery quietly erases a good SEO title.
+        """
+        out: dict[str, Any] = {
+            "slug": self.slug, "title": self.title,
             "elementor_data": self.elementor_data, "template": self.template,
             "parent_slug": self.parent_slug, "menu_order": self.menu_order,
-            "in_menu": self.in_menu,
+            "in_menu": self.in_menu, "post_type": self.post_type,
         }
+        if self.content is not None:
+            out["content"] = self.content
+        if self.post_id:
+            out["post_id"] = self.post_id
+        if self.full_width:
+            out["full_width"] = True
+        if self.content_only_if_new:
+            out["content_only_if_new"] = True
+        for key in (
+            "meta_title", "meta_description", "focus_keyword", "schema_jsonld",
+            "og_title", "og_description", "og_image_url", "twitter_card",
+            "design_css", "featured_image_url",
+        ):
+            value = getattr(self, key)
+            if value:
+                out[key] = value
+        return out
 
 
 @dataclass(frozen=True)
@@ -140,12 +256,28 @@ def build_site_plan(
         planned.append(PlannedPage(
             slug=slug,
             title=title or slug.replace("-", " ").title(),
-            content=str(raw.get("content") or ""),
+            # ABSENT, not empty. `raw.get("content") or ""` would have turned a
+            # structural delivery's missing body into an instruction to blank the
+            # live page - the exact defect this type now makes unrepresentable.
+            content=_opt_str(raw.get("content")),
             elementor_data=str(raw.get("elementor_data") or ""),
             template=str(raw.get("template") or ""),
             parent_slug=slugify(str(raw.get("parent_slug") or "")),
             menu_order=int(raw.get("menu_order") or 0),
             in_menu=bool(raw.get("in_menu", True)),
+            post_id=_opt_int(raw.get("post_id")),
+            post_type=_post_type(raw.get("post_type")),
+            meta_title=str(raw.get("meta_title") or ""),
+            meta_description=str(raw.get("meta_description") or ""),
+            focus_keyword=str(raw.get("focus_keyword") or ""),
+            schema_jsonld=str(raw.get("schema_jsonld") or ""),
+            og_title=str(raw.get("og_title") or ""),
+            og_description=str(raw.get("og_description") or ""),
+            og_image_url=str(raw.get("og_image_url") or ""),
+            twitter_card=str(raw.get("twitter_card") or ""),
+            design_css=str(raw.get("design_css") or ""),
+            featured_image_url=str(raw.get("featured_image_url") or ""),
+            full_width=bool(raw.get("full_width", False)),
         ))
 
     by_slug = {p.slug: p for p in planned}
@@ -177,7 +309,11 @@ def build_site_plan(
     for hub_slug, hub_title in needed_hubs.items():
         planned.append(PlannedPage(
             slug=hub_slug, title=hub_title,
+            # A SEED body, flagged as such: written when the hub is first created and
+            # never again. Without the flag, every later nav rebuild would replace
+            # whatever real landing copy the operator wrote here with this one line.
             content=f"<p>Explore our {hub_title.lower()}.</p>",
+            content_only_if_new=True,
             elementor_data="", template="", parent_slug="", menu_order=0, in_menu=True,
         ))
         notes.append(
@@ -199,12 +335,13 @@ def build_site_plan(
             suggested_parent if suggested_parent in available_hubs and suggested_parent != page.slug else ""
         )
         grouped.append(
-            page if parent_slug == explicit_parent else PlannedPage(
-                slug=page.slug, title=page.title, content=page.content,
-                elementor_data=page.elementor_data, template=page.template,
-                parent_slug=parent_slug, menu_order=page.menu_order,
-                in_menu=page.in_menu, is_front_page=page.is_front_page,
-            )
+            # `replace` rather than a hand-listed constructor call. The old form named
+            # 8 of the dataclass's fields explicitly, so EVERY field added later was
+            # silently dropped from any page that got re-parented - a page nested
+            # under a hub would have lost its post_id and its whole SEO block while
+            # its unnested sibling kept them. A field list that has to be maintained
+            # in lockstep with the dataclass is a bug waiting for the next field.
+            page if parent_slug == explicit_parent else replace(page, parent_slug=parent_slug)
         )
     planned = grouped
     by_slug = {p.slug: p for p in planned}

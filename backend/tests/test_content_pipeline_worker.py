@@ -75,7 +75,13 @@ def _row(**kw: Any) -> dict[str, Any]:
     base: dict[str, Any] = {
         "id": "11111111-1111-1111-1111-111111111111",
         "code": "CJ-4200", "status": "queued", "client_id": "c-1",
-        "client_name": "Dallas Plumbing", "page_type": "service",
+        # AN ARTICLE, deliberately. This file tests the PROSE sequence - the halt, the
+        # redelivery guard, the dash strip, the entity picture - and since 2026-09-26 a
+        # `service` page type runs the TEMPLATED sequence instead (wireframe slots, no
+        # outline, no draft). A templated row here would make every test in the file
+        # assert against a pipeline it is not describing; the templated path has its own
+        # file (tests/test_content_compose.py).
+        "client_name": "Dallas Plumbing", "page_type": "blog",
         "topic": "Emergency plumbing in Dallas", "framework": "PAS",
         "engagement_id": "eng-1",
         "source_pack": {
@@ -201,14 +207,14 @@ class TestAFinishedPageGoesToTheHumanGate:
     def test_a_clean_run_lands_on_needs_review_with_its_work_written(self) -> None:
         store = _Store(_row())
 
-        def draft(ctx: PipelineContext) -> StageResult:
+        def compose(ctx: PipelineContext) -> StageResult:
             ctx.draft_md = "# Emergency plumbing\n\nWe answered 412 calls last year."
             ctx.title = "Emergency Plumber Dallas"
             ctx.meta_description = "Same-day emergency plumbing in Dallas."
-            return ctx.record(StageResult("draft", outcome="ok"))
+            return ctx.record(StageResult("compose", outcome="ok"))
 
         outcome = _run(store, {
-            "draft": draft,
+            "compose": compose,
             "gate": _stage("gate", "ok", weighted_total=88.5, passed=True),
         })
         assert outcome.status == "needs_review" and outcome.state == "advanced"
@@ -221,13 +227,13 @@ class TestAFinishedPageGoesToTheHumanGate:
     def test_a_degraded_run_still_reaches_review_but_says_so(self) -> None:
         store = _Store(_row())
 
-        def draft(ctx: PipelineContext) -> StageResult:
+        def compose(ctx: PipelineContext) -> StageResult:
             ctx.draft_md = "body"
-            return ctx.record(StageResult("draft", outcome="ok"))
+            return ctx.record(StageResult("compose", outcome="ok"))
 
         outcome = _run(store, {
             "research": _stage("research", "degraded"),
-            "draft": draft,
+            "compose": compose,
             "gate": _stage("gate", "ok"),
         })
         assert outcome.status == "needs_review"
@@ -236,7 +242,7 @@ class TestAFinishedPageGoesToTheHumanGate:
 
     def test_a_broken_stage_fails_the_job_honestly(self) -> None:
         store = _Store(_row())
-        outcome = _run(store, {"draft": _stage("draft", "failed")})
+        outcome = _run(store, {"compose": _stage("draft", "failed")})
         assert outcome.status == "failed" and store.final("status") == "failed"
 
 
@@ -328,12 +334,12 @@ class TestTheClientsOwnPhoneNumberReachesThePage:
             ctx.facts = ("count_source: 412 callouts in 2025",)
             return ctx.record(StageResult("sme", outcome="ok"))
 
-        def draft(ctx: PipelineContext) -> StageResult:
+        def compose(ctx: PipelineContext) -> StageResult:
             seen["facts"] = ctx.facts       # what the WRITER would be given
             ctx.draft_md = "body"
-            return ctx.record(StageResult("draft", outcome="ok"))
+            return ctx.record(StageResult("compose", outcome="ok"))
 
-        _SCRIPT["stages"] = {"sme": sme, "draft": draft}
+        _SCRIPT["stages"] = {"sme": sme, "compose": compose}
         deps = PipelineDeps(
             store=store, planning=_Planning(), nap={"phone": "214-555-0142"},
         )
@@ -368,7 +374,7 @@ class TestAPageThatWasNeverWrittenDoesNotReachAHuman:
     def test_a_run_with_no_draft_holds_instead_of_queueing_for_review(self) -> None:
         store = _Store(_row())
         outcome = _run(store, {
-            "outline": _stage("outline", "degraded"),
+            "compose": _stage("outline", "degraded"),
         })
         assert outcome.status == "drafting", "an empty page must not reach the review queue"
         assert store.final("status") != "needs_review"
@@ -376,17 +382,17 @@ class TestAPageThatWasNeverWrittenDoesNotReachAHuman:
 
     def test_the_hold_says_why_on_the_row(self) -> None:
         store = _Store(_row())
-        _run(store, {"outline": _stage("outline", "degraded")})
-        assert "outline" in store.final("stage").lower()
+        _run(store, {"compose": _stage("compose", "degraded")})
+        assert "compose" in store.final("stage").lower()
 
     def test_a_run_that_produced_a_page_still_reaches_review(self) -> None:
         store = _Store(_row())
 
-        def draft(ctx: PipelineContext) -> StageResult:
+        def compose(ctx: PipelineContext) -> StageResult:
             ctx.draft_md = "# A real page\n\nWith real words in it."
-            return ctx.record(StageResult("draft", outcome="ok"))
+            return ctx.record(StageResult("compose", outcome="ok"))
 
-        outcome = _run(store, {"draft": draft, "gate": _stage("gate", "ok")})
+        outcome = _run(store, {"compose": compose, "gate": _stage("gate", "ok")})
         assert outcome.status == "needs_review"
 
 
@@ -400,12 +406,12 @@ class TestWhatTheStagesProduceActuallyReachesTheRow:
     assertions exist to prevent: silent loss between two working halves."""
 
     def _run_with(self, store: _Store, gate_data: dict[str, Any], schema_data: dict[str, Any]) -> Any:
-        def draft(ctx: PipelineContext) -> StageResult:
+        def compose(ctx: PipelineContext) -> StageResult:
             ctx.draft_md = "# A page\n\nWith real words."
-            return ctx.record(StageResult("draft", outcome="ok"))
+            return ctx.record(StageResult("compose", outcome="ok"))
 
         return _run(store, {
-            "draft": draft,
+            "compose": compose,
             "schema_links": _stage("schema_links", "ok", **schema_data),
             "gate": _stage("gate", "ok", **gate_data),
         })
@@ -414,14 +420,14 @@ class TestWhatTheStagesProduceActuallyReachesTheRow:
         store = _Store(_row())
         self._run_with(
             store,
-            {"weighted_total": 91.5, "passed": True, "dimensions": {"voice": 9},
+            {"weighted_total": 91.5, "passed": True, "dimensions": {"compose": 9},
              "blocked_by": [], "provisional": True},
             {},
         )
         qa = store.final("qa_score")
         assert qa["weighted_total"] == 91.5
         assert qa["passed"] is True
-        assert qa["dimensions"] == {"voice": 9}, "the per-dimension scores must survive"
+        assert qa["dimensions"] == {"compose": 9}, "the per-dimension scores must survive"
         assert store.final("qa_weighted_total") == 91.5
 
     def test_the_schema_graph_and_its_settled_type_land(self) -> None:
@@ -486,11 +492,11 @@ class TestTheImageCountIsWhatWasActuallyGenerated:
     photos. Found by reading PAGE_STAGES against v1's `_generate_images`."""
 
     def _run_with(self, store: _Store, stages: dict[str, Any]) -> Any:
-        def draft(ctx: PipelineContext) -> StageResult:
+        def compose(ctx: PipelineContext) -> StageResult:
             ctx.draft_md = "# A page\n\nWith real words."
-            return ctx.record(StageResult("draft", outcome="ok"))
+            return ctx.record(StageResult("compose", outcome="ok"))
 
-        return _run(store, {"draft": draft, **stages})
+        return _run(store, {"compose": compose, **stages})
 
     def test_the_generated_count_reaches_the_row(self) -> None:
         store = _Store(_row())
@@ -774,11 +780,11 @@ class TestTheKeywordMapReachesTheRow:
                 ctx.brief["research"] = brief
             return ctx.record(StageResult("research", outcome="ok"))
 
-        def draft(ctx: PipelineContext) -> StageResult:
+        def compose(ctx: PipelineContext) -> StageResult:
             ctx.draft_md = "# Page\n\nWords."
-            return ctx.record(StageResult("draft", outcome="ok"))
+            return ctx.record(StageResult("compose", outcome="ok"))
 
-        _run(store, {"research": research, "draft": draft, "gate": _stage("gate", "ok")})
+        _run(store, {"research": research, "compose": compose, "gate": _stage("gate", "ok")})
         return store
 
     def test_the_operators_keyword_reaches_the_column_publish_reads(self) -> None:
@@ -809,13 +815,13 @@ class TestTheStoredDraftCarriesNoMachineDashes:
     def _persisted(self, text: str, title: str = "", meta: str = "") -> _Store:
         store = _Store(_row())
 
-        def draft(ctx: PipelineContext) -> StageResult:
+        def compose(ctx: PipelineContext) -> StageResult:
             ctx.draft_md = text
             ctx.title = title
             ctx.meta_description = meta
-            return ctx.record(StageResult("draft", outcome="ok"))
+            return ctx.record(StageResult("compose", outcome="ok"))
 
-        _run(store, {"draft": draft, "gate": _stage("gate", "ok")})
+        _run(store, {"compose": compose, "gate": _stage("gate", "ok")})
         return store
 
     #: Written as code points, not literals: ruff flags an ambiguous dash in
@@ -854,12 +860,12 @@ class TestTheEntityPictureIsKept:
     def test_the_coverage_is_persisted(self) -> None:
         store = _Store(_row())
 
-        def draft(ctx: PipelineContext) -> StageResult:
+        def compose(ctx: PipelineContext) -> StageResult:
             ctx.draft_md = "# Page\n\nWords."
-            return ctx.record(StageResult("draft", outcome="ok"))
+            return ctx.record(StageResult("compose", outcome="ok"))
 
         _run(store, {
-            "draft": draft,
+            "compose": compose,
             "gate": _stage(
                 "gate", "ok", weighted_total=80.0, passed=False,
                 entity_coverage={
@@ -878,12 +884,12 @@ class TestTheEntityPictureIsKept:
         a QA dimension, where it would read as an unscored criterion."""
         store = _Store(_row())
 
-        def draft(ctx: PipelineContext) -> StageResult:
+        def compose(ctx: PipelineContext) -> StageResult:
             ctx.draft_md = "words"
-            return ctx.record(StageResult("draft", outcome="ok"))
+            return ctx.record(StageResult("compose", outcome="ok"))
 
         _run(store, {
-            "draft": draft,
+            "compose": compose,
             "gate": _stage("gate", "ok", weighted_total=80.0, entity_coverage={"covered": []}),
         })
         assert "entity_coverage" not in store.final("qa_score")
@@ -1003,19 +1009,28 @@ class TestTheClusterMapFinallyBecomesInternalLinks:
         assert links[0].keyword == related
         assert links[0].url == "https://acme.test/related"
 
-    def test_an_unrelated_real_page_still_beats_a_target_with_no_url(self) -> None:
-        """Ordering topical-first must not flip the original rule it sits on top of:
-        an unresolved target renders nothing, so letting it consume the cap while a
-        real page waits costs the reader an actual link."""
+    def test_an_unrelated_real_page_is_no_longer_linked_at_all(self) -> None:
+        """An off-topic real page is WORSE than a shorter list, so it is dropped.
+
+        THIS REVERSES AN EARLIER RULE, deliberately. Tier 2 used to take any registry
+        entry - "real pages, off-topic, better than a dead end" - and a measured run
+        (CJ-4346) shipped an article about physical fitness carrying links reading "SEO in
+        2026" and "skincare routine for pakistani skin", because those were the client's
+        most recently published pages. That is not a weaker topical signal, it is a
+        misleading one: it tells a reader those pages are related when they are not.
+
+        So a page with no related siblings now carries fewer links, and the ordering rule
+        this test used to protect (a resolved link beats an unresolved target) is unchanged
+        and still exercised where relatedness actually holds - see the test above.
+        """
         from app.services.content_pipeline.schema_links import plan_internal_links
 
         ctx = _briefed_ctx()
         links = plan_internal_links(
             ctx, internal_urls={"a wholly unrelated page": "https://acme.test/u"})
-        resolved = [x for x in links if x.url]
-        assert resolved, "the real page must appear"
-        assert resolved[0].url == "https://acme.test/u"
-        assert links.index(resolved[0]) < len([x for x in links if not x.url]) + 1
+        assert not [x for x in links if x.url == "https://acme.test/u"], (
+            "an off-topic page must not be presented to the reader as related"
+        )
 
     def test_only_a_link_with_a_url_is_written_into_the_page(self) -> None:
         """`- [anchor]()` renders as unclickable text: markup that looks like a link
@@ -1109,3 +1124,128 @@ class TestAHeroPhotoIsNotPartOfTheAnswerBlock:
         )
         assert "cdn.example" not in excerpt
         assert "We answer the phone at 2am." in excerpt
+
+class TestTheBatchCeilingHoldsBeforeTheFirstSpend:
+    """A bulk build's ceiling (0157) is ONE decision an operator made - "these thirty pages
+    may cost twenty dollars" - and the cost gate has no concept of it: the gate bounds the
+    agency (global halt) and the client (monthly cap), both standing limits.
+
+    Two properties matter more than the arithmetic. It is checked BEFORE the page's first
+    paid stage, or the ceiling is discovered by exceeding it. And it HOLDS rather than
+    FAILS: nothing is wrong with the page, so raising the ceiling and resuming must pick it
+    up unchanged - a failed job would need re-creating."""
+
+    class _BatchStore(_Store):
+        def __init__(self, row: dict[str, Any] | None, spend: Any) -> None:
+            super().__init__(row)
+            self._spend = spend
+            self.spend_calls: list[str] = []
+
+        def batch_spend(self, batch_id: str) -> tuple[float, float | None]:
+            self.spend_calls.append(batch_id)
+            if isinstance(self._spend, Exception):
+                raise self._spend
+            return self._spend
+
+    def test_a_batch_at_its_ceiling_holds_the_page_and_runs_no_stage(self) -> None:
+        store = self._BatchStore(_row(batch_id="b-1"), (20.0, 20.0))
+        ran: list[str] = []
+
+        def _tripwire(ctx: PipelineContext) -> StageResult:
+            ran.append("sme")
+            return ctx.record(StageResult("sme", outcome="ok", data={}))  # type: ignore[arg-type]
+
+        outcome = _run(store, {"sme": _tripwire})
+        assert outcome.state == "degraded"
+        assert outcome.status == "drafting", "held, not failed - a resume must pick it up"
+        assert ran == [], "the ceiling must be checked BEFORE the first stage spends"
+        assert "batch ceiling" in outcome.stage
+        assert "$20.00 of $20.00" in outcome.stage
+
+    def test_a_batch_under_its_ceiling_runs_normally(self) -> None:
+        store = self._BatchStore(_row(batch_id="b-1"), (4.0, 20.0))
+        outcome = _run(store, {"gate": _stage("gate")})
+        assert outcome.state != "degraded" or "ceiling" not in (outcome.stage or "")
+        assert store.spend_calls == ["b-1"]
+
+    def test_a_ceilingless_batch_is_never_held(self) -> None:
+        store = self._BatchStore(_row(batch_id="b-1"), (999.0, None))
+        outcome = _run(store, {"gate": _stage("gate")})
+        assert "ceiling" not in (outcome.stage or "")
+
+    def test_a_job_with_no_batch_never_asks(self) -> None:
+        store = self._BatchStore(_row(), (999.0, 1.0))
+        _run(store, {"gate": _stage("gate")})
+        assert store.spend_calls == [], "a single page has no batch to bound"
+
+    def test_an_unreadable_ceiling_does_not_block_the_work(self) -> None:
+        """A ceiling is a bound the operator ASKED for, not a safety control - the halt and
+        the client cap are the safety controls, and the gate enforces those whatever happens
+        here. So an unanswerable question must not stop paid work the operator authorised."""
+        store = self._BatchStore(_row(batch_id="b-1"), RuntimeError("pool down"))
+        outcome = _run(store, {"gate": _stage("gate")})
+        assert "ceiling" not in (outcome.stage or "")
+
+
+
+# --------------------------------------------------------------------------- #
+# THE CONTEXT CARRIES WHAT THE STAGES ACTUALLY READ.
+#
+# Two fields were read by the compose stage and written by nobody: the chosen TEMPLATE
+# (looked for at `brief["template"]`) and the client's first-party MATERIAL (looked for at
+# `brief["source_pack"]`). Both resolved to empty on every real run, and neither failed:
+# the template quietly became the page type's default, and the evidence gate quietly
+# decided the client had supplied nothing, so the price table, the testimonials, the team
+# and the service areas were dropped from every page the product produced.
+#
+# MEASURED: an `about`-template job published as a service page with five sections, its
+# prices and quotes gone, having been given all of them.
+# --------------------------------------------------------------------------- #
+class TestContextCarriesTheWireframeAndTheEvidence:
+    @staticmethod
+    def _row() -> dict[str, Any]:
+        return _row(
+            page_type="service",
+            source_pack={
+                "template": "about",
+                "client_name": "SPOTiNO",
+                "testimonials": ["Best coaching in the city. - A parent"],
+                "pricing": ["Full programme - on request - two sessions a week"],
+                "team": ["Imran Sadiq - Head of coaching - fifteen years"],
+                "service_areas": ["Gulberg", "Model Town"],
+            },
+        )
+
+    def test_the_operators_chosen_template_reaches_the_context(self) -> None:
+        from workers.tasks.content_pipeline import _context_for
+
+        ctx = _context_for(self._row(), get_settings())
+        assert [s.kind for s in ctx.blueprint] == [
+            "hero", "intro", "benefits", "process", "team", "stats", "cta"
+        ], "the `about` template was chosen and must be the wireframe"
+
+    def test_the_flattened_pairs_still_describe_the_same_wireframe(self) -> None:
+        """`blueprint_sections` is a view of `blueprint`, so the two cannot disagree."""
+        from workers.tasks.content_pipeline import _context_for
+
+        ctx = _context_for(self._row(), get_settings())
+        assert [k for k, _ in ctx.blueprint_sections] == [
+            s.kind for s in ctx.blueprint if s.content
+        ]
+
+    def test_the_clients_own_material_reaches_the_evidence_gate(self) -> None:
+        from app.services.content_pipeline.compose import evidence_available
+        from workers.tasks.content_pipeline import _context_for
+
+        ctx = _context_for(self._row(), get_settings())
+        for source in ("testimonials", "pricing", "team", "areas"):
+            assert evidence_available(ctx, source), f"{source} was supplied and must count"
+
+    def test_a_client_who_supplied_nothing_still_gates_everything_out(self) -> None:
+        """The gate must stay a gate: this is not 'always allow', it is 'read the pack'."""
+        from app.services.content_pipeline.compose import evidence_available
+        from workers.tasks.content_pipeline import _context_for
+
+        ctx = _context_for(_row(source_pack={"template": "about"}), get_settings())
+        for source in ("testimonials", "pricing", "team", "areas", "reviews"):
+            assert not evidence_available(ctx, source)

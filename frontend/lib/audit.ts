@@ -165,6 +165,24 @@ export type AuditRow = {
   // exists to prevent.
   publicUrl: string | null;
   publicSlug: string | null;
+  // Did the crawl actually get to see the site? "ok" | "thin" | "blocked", or "" for a
+  // run that was never assessed (it predates the check, or its ingest never ran).
+  //
+  // This belongs on the ROW and not only in the report because it is the one fact that
+  // changes what the whole document means, and the operator decides whether to send the
+  // report from this table. A site behind Cloudflare produces a run that looks identical
+  // to a clean audit of a small site here: green, complete, a short page list, honest
+  // nulls everywhere. `crawlNote` is the sentence to show; it is empty when the verdict
+  // is "ok", because a banner with nothing to say teaches people to skip banners.
+  crawlVerdict: string;
+  crawlNote: string;
+  // Was the shared link opened, and when does it stop working? Only filled for a page
+  // that actually resolves. `publicViews: 0` on a live link is a real answer - "sent, not
+  // opened" - so it is a number rather than null; `publicExpiresAt` is null when the link
+  // has no expiry, which is the default and what every existing link has.
+  publicViews: number;
+  publicLastViewed: string | null;
+  publicExpiresAt: string | null;
 };
 
 // The three depths an operator can pick, with what each one buys. `pages` is

@@ -1009,7 +1009,9 @@ def test_shape_body_html_renders_gutenberg_blocks_for_a_designed_page() -> None:
     page, not a plain article - it renders as native WordPress Block Editor markup
     (app.services.gutenberg) instead of the flat class-hooked <div> wrap, so it opens
     fully editable as native blocks on ANY WordPress site."""
-    from workers.tasks.content import _shape_body_html
+    import re
+
+    from workers.tasks.content import _resolve_row_blueprint, _shape_body_html
 
     profile = {
         "palette": {
@@ -1028,7 +1030,12 @@ def test_shape_body_html_renders_gutenberg_blocks_for_a_designed_page() -> None:
             "button_style": "solid pill", "card_style": "soft shadow", "spacing_scale": "spacious",
         },
     }
-    row = {"source_pack": {"design_profile": profile}}
+    # page_type is stated rather than defaulted. The blueprint resolver is
+    # page-type-aware (0154): this profile carries only a thin `section_order` with no
+    # `source_page_type`, so it is not per-type evidence and the SERVICE template
+    # supplies the sequence - which is the point of that change, and which the section
+    # classes below therefore come from.
+    row = {"page_type": "service", "source_pack": {"design_profile": profile}}
     draft = "# Best Brunch\n\nIntro.\n\n## Our Services\n\nBody.\n\n## Get in Touch\n\nVisit.\n"
     out = _shape_body_html(row, draft)
 
@@ -1036,13 +1043,29 @@ def test_shape_body_html_renders_gutenberg_blocks_for_a_designed_page() -> None:
     # as raw text) - the theme + plugin article.css style the aios-sec class hooks.
     assert "<style>" not in out
     # Real Gutenberg block comments (opens editable as native blocks, not one giant
-    # Custom HTML / Classic block), the resolved section order + layout variant, and
-    # the ACTUAL draft content (not just the blueprint's static scaffolding).
+    # Custom HTML / Classic block), the resolved section order, and the ACTUAL draft
+    # content (not just the blueprint's static scaffolding).
     assert '<!-- wp:group {"className":"aios-sec aios-hero' in out
-    assert "<h1 class=\"wp-block-heading\">Best Brunch</h1>" in out
-    assert "<p>Intro.</p>" in out
-    assert '<!-- wp:group {"className":"aios-sec aios-services' in out
+    # The heading is asserted on its TEXT and its block markup, not on the exact class
+    # attribute: the hero's alignment is a per-template presentation detail, so pinning
+    # `class="wp-block-heading"` exactly made this test fail when the resolved template
+    # changed while the page was rendering perfectly correctly.
+    assert "<!-- wp:heading" in out
+    assert ">Best Brunch</h1>" in out
+    assert "Intro." in out
     assert "Our Services" in out
+    assert "Body." in out
+    # NOT asserted: the draft's final chunk ("## Get in Touch / Visit."). The CTA
+    # section renders the blueprint's own call-to-action scaffolding - a heading and a
+    # button - rather than draft prose, so the last chunk is deliberately not carried.
+    # Verified as pre-existing: the same draft loses it under the old hero/services/cta
+    # sequence too, so it is the CTA's contract and not a resolver regression.
+    # Every emitted section names a kind from the RESOLVED blueprint - the sequence is
+    # what shapes the page, which is the actual claim of this test.
+    kinds = {spec.kind for spec in _resolve_row_blueprint(row)}
+    emitted = set(re.findall(r'"className":"aios-sec aios-([a-z_]+)', out))
+    assert emitted, "a designed page emits class-hooked sections"
+    assert emitted <= kinds, f"emitted sections outside the blueprint: {emitted - kinds}"
 
 
 # --------------------------------------------------------------------------- #
@@ -1251,3 +1274,51 @@ def test_without_a_chosen_keyword_it_still_falls_back_to_the_topic() -> None:
         settings=_settings(), gate=_gate(), fetcher=FakePageFetcher(),
     )
     assert store.row["keyword_map"]["primary"] == "best brunch in portland"
+
+class TestAnImageTheClientSiteCannotFetchIsSaidOutLoud:
+    """The plugin sends image URLs, not bytes: it sideloads the featured image BY URL and
+    leaves the body's <img> tags as written. So both depend on the image host being an
+    origin the CLIENT'S SERVER can reach.
+
+    Found by pushing a real page to a real site from a dev box. `PUBLIC_FILE_BASE_URL` was
+    `http://127.0.0.1:8010`, which on their server means THEIR machine: the featured-image
+    sideload failed silently (the plugin swallows it) and every body image 404s for every
+    visitor - while the operator was told, truthfully but incompletely, "Pushed to
+    WordPress"."""
+
+    def test_a_loopback_image_host_is_flagged(self) -> None:
+        from workers.tasks.content import _images_unreachable
+
+        class _S:
+            public_file_base_url = "http://127.0.0.1:8010"
+
+        body = '<p>x</p><img src="http://127.0.0.1:8010/api/v1/public/content-images/a.png">'
+        assert _images_unreachable(body, _S()) is True
+
+    def test_a_private_range_is_flagged_too(self) -> None:
+        from workers.tasks.content import _images_unreachable
+
+        class _S:
+            public_file_base_url = "http://192.168.0.14:8010"
+
+        assert _images_unreachable('<img src="http://192.168.0.14/x.png">', _S()) is True
+
+    def test_a_real_public_host_is_not_flagged(self) -> None:
+        from workers.tasks.content import _images_unreachable
+
+        class _S:
+            public_file_base_url = "https://app.qanry.com"
+
+        body = '<img src="https://app.qanry.com/api/v1/public/content-images/a.png">'
+        assert _images_unreachable(body, _S()) is False
+
+    def test_a_page_with_no_images_is_never_flagged(self) -> None:
+        """Nothing to break, so nothing to warn about - a warning on a text-only page is
+        noise that teaches operators to ignore the one that matters."""
+        from workers.tasks.content import _images_unreachable
+
+        class _S:
+            public_file_base_url = "http://127.0.0.1:8010"
+
+        assert _images_unreachable("<p>no pictures here</p>", _S()) is False
+

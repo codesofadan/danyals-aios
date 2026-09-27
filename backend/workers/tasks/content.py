@@ -55,12 +55,14 @@ site. Nothing does, by design and by decision - so the code now says so.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from html import escape as html_escape
+from pathlib import Path
 from typing import Any, Protocol
 
 import psycopg
@@ -115,7 +117,15 @@ from app.services.elementor import elementor_json, elementor_json_from_model
 from app.services.gutenberg import model_to_gutenberg
 from app.services.notifications import email_client_sync, notify_leads_sync
 from app.services.page_blueprints import SectionSpec, resolve_blueprint
-from app.services.page_model import model_to_html, page_model_for_job, page_model_from_dict
+from app.services.page_model import (
+    PageModel,
+    font_families,
+    model_body_html,
+    model_css,
+    page_model_for_job,
+    page_model_from_dict,
+)
+from app.services.site_plan import ARTICLE_PAGE_TYPES
 from app.services.wp_connections import ResolvedWpConnection, resolve_connection
 from integrations.content_providers import ContentProviders, content_providers_from_settings
 from integrations.images import FakeImageGenerator, GeneratedImage, ImageGenerator
@@ -192,6 +202,11 @@ class ContentStore(Protocol):
 
     def load(self, code: str) -> dict[str, Any] | None: ...
     def update(self, code: str, fields: dict[str, Any]) -> dict[str, Any] | None: ...
+    # `batch_spend` is deliberately NOT part of this Protocol. The concrete store
+    # implements it and the batch-ceiling check reaches for it defensively
+    # (`getattr`, see `_batch_over_ceiling`), so every existing fake store in the
+    # test suite stays valid. Widening the Protocol would make an optional read look
+    # mandatory and break a dozen fakes to add one bound that degrades safely.
 
 
 class QaScorer(Protocol):
@@ -223,6 +238,29 @@ class PrivilegedContentStore:
         with privileged_connection() as cur:
             cur.execute("select * from public.content_jobs where code = %s limit 1", (code,))
             return cur.fetchone()
+
+    def batch_spend(self, batch_id: str) -> tuple[float, float | None]:
+        """``(spent, ceiling)`` for one content batch (0157).
+
+        Spend is SUMMED FROM THE JOBS, not stored: a ceiling checked against a second
+        running total would eventually be checked against a number that no longer matches
+        what was charged, and the failure would be silent in both directions. A batch id
+        that resolves to nothing yields ``(0.0, None)`` - no ceiling, no hold, which is the
+        correct reading of "there is no such batch" for a bound the operator opted into.
+        """
+        with privileged_connection() as cur:
+            cur.execute(
+                """select b.cost_ceiling,
+                          coalesce((select sum(j.cost) from public.content_jobs j
+                                    where j.batch_id = b.id), 0) as spent
+                   from public.content_batches b where b.id = %s::uuid limit 1""",
+                (batch_id,),
+            )
+            row = cur.fetchone()
+        if row is None:
+            return 0.0, None
+        ceiling = row.get("cost_ceiling")
+        return float(row.get("spent") or 0), (float(ceiling) if ceiling is not None else None)
 
     def update(self, code: str, fields: dict[str, Any]) -> dict[str, Any] | None:
         if not fields:
@@ -1248,13 +1286,85 @@ def _design_section_order(row: dict[str, Any]) -> list[str]:
     return [str(name).strip() for name in order if str(name).strip()]
 
 
+def _kit_design_profile(client_id: str) -> dict[str, Any] | None:
+    """The client's APPROVED brand kit as a design profile, or ``None``.
+
+    Only an APPROVED kit counts (0146): the analyzer can produce a profile that validates
+    and is wrong - a bot-blocked capture, a cookie wall, a site mid-redesign - and letting
+    whatever was measured last silently become the system dozens of pages are styled to is
+    expensive to discover and expensive to undo.
+
+    Never raises: a storage failure returns ``None`` and the caller falls back to whatever
+    the job itself carries, rather than failing a publish over a styling lookup.
+    """
+    if not client_id:
+        return None
+    try:
+        from app.modules.content_planning.repo import ContentPlanningStore
+
+        kit = ContentPlanningStore().approved_brand_kit(client_id)
+    except Exception:
+        logger.warning("content_kit_design_read_failed", client_id=client_id)
+        return None
+    if not kit:
+        return None
+    blueprint = kit.get("blueprint") or []
+    blueprints = kit.get("blueprints") or {}
+    raw = _as_dict(kit.get("raw_measurements"))
+    if not blueprint and not blueprints and not raw.get("section_order"):
+        return None
+    return {
+        "palette": kit.get("palette") or {},
+        "typography": kit.get("typography") or {},
+        "components": kit.get("components") or {},
+        "layout": {
+            "blueprint": blueprint,
+            # The per-page-type map + what kind of page the singular blueprint was
+            # measured on (migration 0154) - without both, resolve_blueprint cannot tell
+            # a homepage measurement from evidence about this page's type.
+            "blueprints": blueprints,
+            "source_page_type": kit.get("source_page_type") or "",
+            "section_order": raw.get("section_order") or [],
+            "container_width": raw.get("container_width") or "1200px",
+            "hero_style": raw.get("hero_style") or "centered",
+            "cta_style": raw.get("cta_style") or "banner",
+        },
+    }
+
+
+def effective_design_profile(row: dict[str, Any]) -> dict[str, Any] | None:
+    """The design system this job's page is both STRUCTURED and STYLED to.
+
+    WHY THIS EXISTS. The pipeline already resolved the client's approved kit server-side
+    so that "analyse once, conform forever" needs no caller to remember to send a design
+    with every job. The PUBLISH path did not: ``_resolve_row_blueprint``,
+    ``_design_css_text`` and ``_is_full_width_page`` each read only
+    ``source_pack["design_profile"]``. A job created without an inline profile - which is
+    the normal case once a client HAS a kit - therefore took its structure from the kit
+    and its STYLING from ``_classic_style_block()``, a generic look with none of the
+    client's palette or fonts. It also stayed at the narrow article measure and skipped
+    the native-block render, because that decision reads the same absent key.
+
+    So the kit is resolved HERE, once, for every consumer.
+
+    PRECEDENCE IS THE KIT, THEN THE JOB - deliberately, and matching the pipeline: a
+    per-request ``design_profile`` is whatever a wizard happened to hold in React state at
+    launch, while the kit is what the client's design system actually IS, versioned and
+    accepted by a human.
+    """
+    kit = _kit_design_profile(str(row.get("client_id") or "").strip())
+    if kit:
+        return kit
+    return _as_dict(_as_dict(row.get("source_pack")).get("design_profile")) or None
+
+
 def _resolve_row_blueprint(row: dict[str, Any]) -> list[SectionSpec]:
-    """The effective ordered page blueprint for a job: the ANALYZED site's blueprint if
-    present, else the chosen TEMPLATE, else the page-type default (see
-    ``page_blueprints.resolve_blueprint``). ``[]`` -> no structure to shape by (the
+    """The effective ordered page blueprint for a job: the client's MEASURED blueprint for
+    this page type if there is one, else the chosen TEMPLATE, else the page-type default
+    (see ``page_blueprints.resolve_blueprint``). ``[]`` -> no structure to shape by (the
     publish path keeps its plain behaviour)."""
     raw = _as_dict(row.get("source_pack"))
-    profile = _as_dict(raw.get("design_profile")) or None
+    profile = effective_design_profile(row)
     template = str(raw.get("template") or "").strip() or None
     page_type = str(row.get("page_type") or "blog")
     return resolve_blueprint(design_profile=profile, template=template, page_type=page_type)
@@ -1564,20 +1674,79 @@ def _with_layout_css(style: str) -> str:
     return f"<style>{_LAYOUT_CSS}</style>{style}"
 
 
+def _design_font_families(row: dict[str, Any]) -> list[str]:
+    """The real typeface names this page's design asks for (see `page_model.font_families`).
+
+    Read from the SAME source the body's stylesheet came from, so the fonts requested and
+    the fonts referenced can never describe different designs."""
+    model = _publish_model(row)
+    if model is not None:
+        return font_families(model.design)
+    profile = _as_dict(effective_design_profile(row))
+    return font_families(profile) if profile else []
+
+
+def _publish_model(row: dict[str, Any]) -> PageModel | None:
+    """The :class:`PageModel` this row publishes as, or ``None`` when it publishes as prose.
+
+    ONE DECISION, TWO CONSUMERS. The body and its stylesheet are produced by different
+    functions and sent in different payload fields, and for a while they disagreed about
+    which renderer had run: the body came out of the model renderer in the ``.aios-doc``
+    vocabulary while ``design_css`` carried rules written for ``.aios-page``. Every rule
+    missed, so a page composed slot by slot published as unstyled markup - the structure of
+    one renderer and the styling of neither. Deciding once, here, is what stops that.
+
+    A model is present when the page was COMPOSED into a wireframe (the worker writes it to
+    ``source_pack.page_model``) or hand-edited in the dashboard live editor (the editor
+    writes it to the same place). Both are already the finished page; neither is a draft to
+    re-shape.
+    """
+    saved = _as_dict(_as_dict(row.get("source_pack")).get("page_model"))
+    if not saved.get("sections"):
+        return None
+    try:
+        model = page_model_from_dict(saved)
+    except Exception:
+        logger.warning("content_saved_model_render_failed", code=str(row.get("code", "")))
+        return None
+    # THE STRUCTURE IS A SNAPSHOT; THE DESIGN IS LIVE.
+    #
+    # The sections are what the writer produced for this page and must not change under
+    # it. The palette, typeface and radius are not that - they are the client's design
+    # SYSTEM, which is exactly the thing that is meant to change in one place and apply
+    # everywhere. Styling from the snapshot instead meant a kit edit reached no existing
+    # page: change the client's font and forty already-written pages keep the old one
+    # until each is regenerated, at full model cost, to alter a value nothing about the
+    # writing depends on.
+    #
+    # So the current kit is overlaid at publish time, and only when there is one - a
+    # client with no kit keeps whatever the page was built with.
+    live = _as_dict(effective_design_profile(row))
+    if live:
+        model.design = live
+    return model
+
+
 def _design_css_text(row: dict[str, Any]) -> str:
     """The design CSS (WITHOUT the ``<style>`` wrapper) the AIOS Publisher plugin enqueues
     in the page ``<head>`` so the flat-HTML body VISUALLY matches the analyzed site (or the
     template's classic look) on ANY WordPress theme - including a plain default theme with
     no Elementor.
 
-    This is the seam that revives ``_design_style_block``: it can't ride inside the post
-    body (the plugin's ``wp_kses_post`` strips a ``<style>`` tag but keeps its text, dumping
-    raw CSS on the page), so the CSS is sent as a SEPARATE ``design_css`` payload field and
-    the plugin prints it in ``<head>`` instead. Scoped to ``.aios-page`` (the body wrapper)
-    so it only styles the generated content. Returns ``""`` when the body is a plain render
-    (no profile AND no blueprint) - there is no ``.aios-page`` wrapper to style, mirroring
-    :func:`_shape_body_html`."""
-    profile = _as_dict(_as_dict(row.get("source_pack")).get("design_profile"))
+    The CSS can't ride inside the post body - the plugin strips a ``<style>`` tag INCLUDING
+    its contents, because ``wp_kses_post`` would otherwise remove the tag and keep its text,
+    dumping the stylesheet onto the page as visible characters. So it is sent as a SEPARATE
+    ``design_css`` payload field and the plugin prints it in ``<head>``. Returns ``""`` when
+    the body is a plain render (no model, no profile AND no blueprint) - there is no wrapper
+    to style, mirroring :func:`_shape_body_html`."""
+    # A COMPOSED OR HAND-EDITED PAGE carries its own stylesheet, derived from the same
+    # design tokens the model was built with. It must be this one and not the flat-wrap
+    # stylesheet: the two target different class vocabularies, and the body being sent
+    # alongside is the model renderer's.
+    model = _publish_model(row)
+    if model is not None:
+        return model_css(model).strip()
+    profile = _as_dict(effective_design_profile(row))
     specs = _resolve_row_blueprint(row)
     if not profile and not specs:
         return ""
@@ -1594,7 +1763,11 @@ def _design_css_text(row: dict[str, Any]) -> str:
 
 # Page types that read best at a NARROW article measure (long-form prose). Every other
 # type is a landing page that should use the FULL page width.
-_ARTICLE_PAGE_TYPES = frozenset({"blog", "faq"})
+#
+# Imported from `site_plan` rather than defined here: the SITE-delivery path has to
+# name the same WordPress post type when it re-delivers one of these pages, and a
+# second copy of the set is how that path came to look a blog `post` up as a `page`.
+_ARTICLE_PAGE_TYPES = ARTICLE_PAGE_TYPES
 
 
 def _is_full_width_page(row: dict[str, Any]) -> bool:
@@ -1606,8 +1779,7 @@ def _is_full_width_page(row: dict[str, Any]) -> bool:
     (service / local / homepage / ...), i.e. NOT a long-form ``blog`` / ``faq`` article.
     The plugin turns this into a ``.aios-article--full`` class that breaks the page out of
     the theme's narrow content column."""
-    raw = _as_dict(row.get("source_pack"))
-    if _as_dict(raw.get("design_profile")):
+    if _as_dict(effective_design_profile(row)):
         return True
     page_type = str(row.get("page_type") or "blog").strip().lower()
     return page_type not in _ARTICLE_PAGE_TYPES
@@ -1619,14 +1791,25 @@ def _shape_body_html(row: dict[str, Any], draft_md: str) -> str:
     blocks + a ``<style>`` block so the published page MATCHES the analyzed site (colours
     + fonts + layout + components) or the chosen TEMPLATE's classic structure - not just
     a flat section-order. No profile AND no template -> plain render (no regression)."""
-    # A page HAND-EDITED in the dashboard live editor wins: render the exact saved model
-    # to the same styled HTML the editor previewed (preview == published).
-    saved_model = _as_dict(_as_dict(row.get("source_pack")).get("page_model"))
-    if saved_model.get("sections"):
-        try:
-            return model_to_html(page_model_from_dict(saved_model), fragment=True)
-        except Exception:
-            logger.warning("content_saved_model_render_failed", code=str(row.get("code", "")))
+    # A COMPOSED page (the wireframe, filled slot by slot) or one HAND-EDITED in the
+    # dashboard live editor wins: render that exact model, which is already the finished
+    # page rather than a draft to re-shape. Preview == published, byte for byte.
+    #
+    # WITHOUT the ``<style>`` block - deliberately, and it is not a loss. The plugin strips
+    # a style tag and its contents before saving, so a body carrying its own CSS arrives
+    # with every class intact and not one rule behind them. The stylesheet travels in the
+    # payload's ``design_css`` field instead (:func:`_design_css_text`, same model, same
+    # design tokens) and the plugin enqueues it in ``<head>``.
+    #
+    # NOT rendered as Gutenberg blocks, which is the one thing given up here. That renderer
+    # covers seven section kinds; a composed page has thirteen, and the six it does not know
+    # (pricing, stats, team, service areas, proof, and the richer process step) come out
+    # EMPTY - a page that silently publishes five of its seven sections. Editable-but-wrong
+    # is worse than correct-but-flat, and the page stays editable where it is actually
+    # edited: the dashboard live editor, on this same model.
+    model = _publish_model(row)
+    if model is not None:
+        return model_body_html(model)
     profile = _as_dict(_as_dict(row.get("source_pack")).get("design_profile"))
     specs = _resolve_row_blueprint(row)
     # A DESIGNED page (an analyzed site's profile, or a landing page_type with an
@@ -2070,7 +2253,104 @@ def _derive_cta(row: dict[str, Any]) -> dict[str, str]:
     }
 
 
-def _seo_fields(row: dict[str, Any], draft_md: str, title: str) -> SeoFields:
+#: How often a phrase must appear in the body before it is worth declaring as THE focus
+#: keyphrase. Two is not an SEO target - it is the floor below which an analyser is
+#: certain to mark the page as not about the phrase at all.
+_KEYPHRASE_MIN_DENSITY = 0.005
+
+
+def _supportable_keyphrase(phrase: str, meta_title: str, body_html: str) -> str:
+    """The focus keyphrase, but only if the finished page can actually carry it.
+
+    AN UNSET KEYPHRASE IS GREY IN THE EDITOR; A FAILING ONE IS RED. Grey reads as "not
+    analysed", which is honest. Red reads as a defect report, and the client sees it
+    before we do.
+
+    MEASURED on two pages already on a client's site. The declared phrase was the job's
+    TOPIC - "About SPOTiNO: how we coach", which is a page title and not something anyone
+    searches - and it appeared once in 819 words, in no heading, in neither the title nor
+    the description. Every check Yoast runs failed, so every badge went red, on a page
+    whose writing was fine.
+
+    The real repair is upstream: `compose` now asks the writer to place the phrase in the
+    heading, the opening and a subheading, so a page normally DOES support it and the
+    keyphrase ships. This is the floor underneath that - it stops a page the writer could
+    not naturally fit the phrase into from arriving pre-marked as broken.
+    """
+    phrase = phrase.strip()
+    if not phrase:
+        return ""
+    needle = phrase.lower()
+
+    # MEASURED ON WHAT PUBLISHES. This used to count uses in `draft_md`, the markdown
+    # MIRROR of the page - which repeats the hero heading, so a phrase appearing ONCE on
+    # the rendered page counted as twice and the guard waved it through. The analyser
+    # reads the post body; so does this.
+    text = re.sub(r"<[^>]+>", " ", body_html).lower()
+    density = text.count(needle) / max(len(text.split()), 1)
+
+    # The SEO title is the strongest single placement: a page titled around the phrase is
+    # about it whatever the body's density says.
+    if needle in meta_title.lower():
+        return phrase
+
+    # Otherwise it must clear the placements the analyser actually scores - the opening
+    # paragraph, a subheading, and the density floor. Any one of them missing is a red
+    # badge, so all three are required rather than any of them.
+    first = re.search(r"<p\b[^>]*>(.*?)</p>", body_html, re.S)
+    in_intro = first is not None and needle in re.sub(r"<[^>]+>", " ", first.group(1)).lower()
+    in_heading = any(
+        needle in re.sub(r"<[^>]+>", " ", h).lower()
+        for h in re.findall(r"<h[23]\b[^>]*>(.*?)</h[23]>", body_html, re.S)
+    )
+    if in_intro and in_heading and density >= _KEYPHRASE_MIN_DENSITY:
+        return phrase
+
+    logger.info(
+        "content_keyphrase_withheld", phrase_words=len(phrase.split()),
+        in_intro=in_intro, in_heading=in_heading, density=round(density, 4),
+    )
+    return ""
+
+
+#: The plugin in the client's editor turns the description bar amber above this, and that
+#: bar is the number an operator actually sees. Google's own truncation is pixel-based and
+#: a little higher, which is where the writer's own ceiling came from.
+_DESC_DISPLAY_MAX = 155
+
+#: ...and the floor of the same green band. A trim that drops BELOW this trades an amber
+#: "too long" for an amber "too short", which is not a fix. Caught by the audit: a 157
+#: character description cut at its last sentence boundary came out at 111.
+_DESC_DISPLAY_MIN = 120
+
+
+def _fit_description(description: str) -> str:
+    """Trim a meta description to what the editor will show as green.
+
+    THE WRITER IS BOUNDED AND STILL OVERSHOOTS. `title_meta` asks for a length and
+    re-prompts when the reply misses, but it is asking a model to count characters in its
+    head - and two pages already on a client's site went out at 157 and 159, four
+    characters over, amber in the editor every time it is opened. A deterministic trim at
+    the door costs nothing and cannot miss.
+
+    Cut at a SENTENCE boundary when one is available and still leaves a usable
+    description, else at a word boundary. No ellipsis: Google adds its own, and a
+    description that announces its own truncation reads worse than one that simply ends.
+    """
+    text = " ".join(description.split())
+    if len(text) <= _DESC_DISPLAY_MAX:
+        return text
+    window = text[:_DESC_DISPLAY_MAX]
+    stop = max(window.rfind(". "), window.rfind("! "), window.rfind("? "))
+    if stop + 1 >= _DESC_DISPLAY_MIN:
+        return window[: stop + 1].strip()
+    cut = window.rfind(" ")
+    return (window[:cut] if cut > 0 else window).rstrip(" ,;:-").strip()
+
+
+def _seo_fields(
+    row: dict[str, Any], draft_md: str, title: str, *, body_html: str = ""
+) -> SeoFields:
     """The SEO half of a WordPress push, derived from the finished job ONCE.
 
     THE DEFECT THIS EXISTS TO PREVENT: this derivation used to live inline in
@@ -2093,10 +2373,13 @@ def _seo_fields(row: dict[str, Any], draft_md: str, title: str) -> SeoFields:
     schema = (
         json.dumps(json_ld) if isinstance(json_ld, dict) and json_ld.get("@graph") else ""
     )
+    meta_title = str(meta.get("title") or title)
     return SeoFields(
-        meta_title=str(meta.get("title") or title),
-        meta_description=str(meta.get("description") or ""),
-        focus_keyword=str(keyword_map.get("primary") or ""),
+        meta_title=meta_title,
+        meta_description=_fit_description(str(meta.get("description") or "")),
+        focus_keyword=_supportable_keyphrase(
+            str(keyword_map.get("primary") or ""), meta_title, body_html or draft_md
+        ),
         tags=tuple(_derive_tags(row)),
         featured_image_url=_first_image_url(draft_md),
         schema_jsonld=schema,
@@ -2120,7 +2403,11 @@ def _plugin_payload(
     # The SEO half is derived by the SHARED helper (see its docstring) and only
     # RENAMED here into the plugin's own field names; the REST/XML-RPC path reads the
     # same struct, so the two can no longer drift apart.
-    seo = _seo_fields(row, draft_md, title)
+    # THE BODY FIRST. The focus keyphrase is only declared when the finished page can
+    # actually carry it, and "the finished page" is this HTML - not the markdown mirror
+    # it was rendered from.
+    body_html = _shape_body_html(row, draft_md)
+    seo = _seo_fields(row, draft_md, title, body_html=body_html)
     # ONE predicate, three consumers: the WordPress post type, the plugin's full_width
     # flag, and the Elementor stretch. They used to be decided separately (two of them
     # not at all), so a "full width" page could be published as a blog POST with boxed
@@ -2128,7 +2415,7 @@ def _plugin_payload(
     full_width = _is_full_width_page(row)
     payload: dict[str, Any] = {
         "title": title,
-        "content": _shape_body_html(row, draft_md),
+        "content": body_html,
         "status": "draft",  # push as a DRAFT - a human publishes it on WordPress
         # A landing page is a PAGE. Publishing a service/local page as a `post` handed
         # it the theme's single-post template - a narrow blog column with wide margins,
@@ -2150,16 +2437,47 @@ def _plugin_payload(
     # WordPress media library (never left hotlinked to the AIOS content-image host).
     if seo.featured_image_url:
         payload["featured_image_url"] = seo.featured_image_url
+        # ...and the SOCIAL CARD image, which is the same picture. Yoast and Rank Math
+        # both fall back to the featured image for `og:image` in most configurations,
+        # but "most configurations" is not a guarantee and a card with no image is the
+        # difference between a shared link that gets clicked and one that does not.
+        # Naming it explicitly makes the card deterministic.
+        #
+        # The card's TITLE and DESCRIPTION are deliberately NOT sent: the plugin falls
+        # them back to `meta_title` / `meta_description` (i.e. this page's search
+        # snippet), which is what a page whose social copy nobody wrote separately
+        # should say. Sending a duplicate of the same two strings here would add a
+        # second place for them to drift.
+        payload["og_image_url"] = seo.featured_image_url
     if seo.schema_jsonld:
         payload["schema_jsonld"] = seo.schema_jsonld
     # Article-template components (each optional; the plugin styles them theme-native).
-    takeaways = _derive_takeaways(draft_md)
-    if takeaways:
-        payload["key_takeaways"] = takeaways
-    faq = _derive_faq(draft_md)
-    if faq:
-        payload["faq"] = faq
-    payload["cta"] = _derive_cta(row)
+    #
+    # NOT SENT FOR A SELF-CONTAINED DESIGN PAGE. These are what the plugin adds ABOVE and
+    # BELOW a long-form article's flat body - a key-takeaways box, an FAQ accordion, a
+    # closing call to action. A composed page already HAS its FAQ and its CTA as designed
+    # sections, so sending them produces the page twice over: a second accordion and a
+    # second banner underneath the ones the reader just passed. That, plus the byline and
+    # the generated table of contents the same renderer adds, is the whole of the reported
+    # difference between the local preview and the published page.
+    # THE POST THIS PAGE ALREADY IS, when it has one. Without it every push creates a
+    # new post, so re-pushing a page after a fix leaves the previous attempt behind as an
+    # orphan draft and the operator has to work out which of them is current. The plugin
+    # refuses an id that is not a post it manages, so this can only ever update our own.
+    existing_post = str(row.get("wp_post_id") or "").strip()
+    if existing_post.isdigit():
+        payload["post_id"] = int(existing_post)
+    self_contained = _publish_model(row) is not None
+    if self_contained:
+        payload["self_contained"] = True
+    else:
+        takeaways = _derive_takeaways(draft_md)
+        if takeaways:
+            payload["key_takeaways"] = takeaways
+        faq = _derive_faq(draft_md)
+        if faq:
+            payload["faq"] = faq
+        payload["cta"] = _derive_cta(row)
     # Design CSS: the analyzed site's (or template's) palette / fonts / layout / component
     # styling, sent as a SEPARATE field the plugin enqueues in <head> so the flat-HTML body
     # matches the design on ANY theme (a plain default theme, no Elementor). Absent -> a
@@ -2167,6 +2485,14 @@ def _plugin_payload(
     design_css = _design_css_text(row)
     if design_css:
         payload["design_css"] = design_css
+    # THE TYPEFACES THE CSS ASKS FOR, so the site can actually load them. Naming a family
+    # is not having it: `font-family: Poppins, ...` on a site that never loaded Poppins
+    # renders in whatever comes next in the stack, and the page looks nothing like the
+    # design it was built from while the CSS is exactly right. MEASURED on a live push -
+    # the page rendered in the THEME's typeface with the client's own named in every rule.
+    fonts = _design_font_families(row)
+    if fonts:
+        payload["design_fonts"] = fonts
     # Full-width layout: a landing page (a non-article page type, or a page built to MATCH
     # an analyzed site's design) uses the FULL page width; a blog / FAQ article keeps the
     # narrow reading measure. The plugin turns this into a `.aios-article--full` class.
@@ -2175,7 +2501,25 @@ def _plugin_payload(
     # Elementor-editable output: attach the widget tree so the plugin writes the builder
     # post-meta (guarded by the setting; absent when disabled -> byte-identical payload).
     settings = settings or get_settings()
-    if settings.content_elementor_enabled:
+    # ONE RENDERER PER PAGE, and this is the rule the whole design promise rests on.
+    #
+    # WHEN ELEMENTOR IS GIVEN A TREE IT RENDERS THAT TREE INSTEAD OF `post_content`. So a
+    # payload carrying BOTH our styled HTML body and an Elementor tree publishes the tree
+    # and throws the body away - along with `design_css`, whose every selector is
+    # `.aios-doc …` and which therefore matches nothing in the Elementor markup. MEASURED
+    # on a real push (spotino.org, post 284): the head carried 8.9 KB of the client's
+    # design system, the body carried none of its classes, and the live page rendered in
+    # the THEME's typeface and the THEME's spacing. The operator's report was the correct
+    # one - "both same pages, but different layout".
+    #
+    # A COMPOSED page therefore publishes its HTML body alone. That body IS the design
+    # system applied to the wireframe, and it is byte-for-byte what the dashboard preview
+    # showed, which is the guarantee this path exists to make. The page stays editable
+    # where it is actually edited - the dashboard live editor, on the same model.
+    #
+    # Everything else is unchanged: a prose page with no composed model still ships the
+    # Elementor tree, because there its body is a flat render that the tree improves on.
+    if settings.content_elementor_enabled and _publish_model(row) is None:
         raw_pack = _as_dict(row.get("source_pack"))
         design_profile = _as_dict(raw_pack.get("design_profile")) or None
         saved_model = _as_dict(raw_pack.get("page_model"))
@@ -2204,6 +2548,116 @@ def _plugin_payload(
     return payload
 
 
+#: Hosts a client's WEB SERVER can never fetch from. `localhost`/loopback resolve on
+#: THEIR machine, not ours, and a private range is only reachable inside our own network.
+_UNREACHABLE_IMAGE_HOSTS = ("127.0.0.1", "localhost", "0.0.0.0", "::1", "192.168.", "10.0.")
+
+
+def _images_unreachable(body_html: str, settings: Settings | None) -> bool:
+    """True when the pushed body carries image URLs the client's site cannot fetch.
+
+    Deliberately a STRING test over the body that was actually sent rather than a check
+    of the setting alone: an image can also arrive from an artifact host configured
+    separately, and what matters is the URL that reached the page.
+    """
+    if "<img" not in body_html.lower():
+        return False
+    base = str(getattr(settings, "public_file_base_url", "") or "")
+    haystack = f"{body_html} {base}".lower()
+    return any(host in haystack for host in _UNREACHABLE_IMAGE_HOSTS)
+
+
+def _local_image_path(url: str, settings: Settings | None) -> Path | None:
+    """The file behind a generated-image URL, when that URL is one of OURS.
+
+    Matched against the configured public base and the content-image route rather than by
+    guessing from the path, so an unrelated image on the page (a client's own CDN, a stock
+    URL a reviewer pasted in) is never read off this disk and re-uploaded.
+    """
+    base = str(getattr(settings, "public_file_base_url", "") or "").rstrip("/")
+    marker = "/api/v1/public/content-images/"
+    if marker not in url:
+        return None
+    if base and not url.startswith(base):
+        return None
+    name = url.split(marker, 1)[1].split("?", 1)[0].split("#", 1)[0]
+    # One path segment, no traversal: the route serves flat, content-addressed names.
+    if not name or "/" in name or "\\" in name or name.startswith("."):
+        return None
+    root = getattr(settings, "content_image_dir", "") or ""
+    if not root:
+        return None
+    path = (Path(str(root)) / name).resolve()
+    try:
+        path.relative_to(Path(str(root)).resolve())
+    except ValueError:
+        return None
+    return path if path.is_file() else None
+
+
+_IMAGE_CONTENT_TYPES: dict[str, str] = {
+    ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+    ".webp": "image/webp", ".gif": "image/gif", ".avif": "image/avif",
+}
+
+
+def _push_local_images(
+    payload: dict[str, Any], publisher: PluginPublisher, settings: Settings | None
+) -> dict[str, Any]:
+    """Upload our own generated images to the site and rewrite the payload to point there.
+
+    WHY THIS EXISTS. Every image in a pushed page travels as a URL for WordPress to fetch,
+    which silently requires the platform's image host to be reachable FROM the client's
+    server. In production it is. From a laptop, a private network or anything behind a VPN
+    it is not, and the failure is invisible: the plugin treats a failed sideload as
+    best-effort, the post lands, the operator is told "Pushed to WordPress", and every
+    picture on the page 404s for every visitor. Measured on a real push to a real site.
+
+    So the bytes are sent instead, to the plugin's ``/media`` route, and the payload is
+    rewritten to the URLs the site gives back. Entirely best-effort and entirely optional:
+    a site whose plugin predates that route returns nothing, we change nothing, and the
+    page publishes with remote URLs exactly as before. Only OUR OWN generated images are
+    touched (see :func:`_local_image_path`) - never a URL the page got from anywhere else.
+    """
+    uploader = getattr(publisher, "upload_media", None)
+    if uploader is None:
+        return payload
+    content = str(payload.get("content") or "")
+    featured = str(payload.get("featured_image_url") or "")
+    urls = set(re.findall(r'<img\b[^>]*\ssrc="([^"]+)"', content))
+    if featured:
+        urls.add(featured)
+
+    rewritten: dict[str, str] = {}
+    for url in sorted(urls):
+        path = _local_image_path(url, settings)
+        if path is None:
+            continue
+        content_type = _IMAGE_CONTENT_TYPES.get(path.suffix.lower())
+        if content_type is None:
+            continue
+        try:
+            data = path.read_bytes()
+        except OSError:
+            continue
+        remote = str(uploader(data, filename=path.name, content_type=content_type) or "")
+        if remote:
+            rewritten[url] = remote
+
+    if not rewritten:
+        return payload
+    out = dict(payload)
+    for old, new in rewritten.items():
+        content = content.replace(old, new)
+    out["content"] = content
+    for key in ("featured_image_url", "og_image_url"):
+        current = str(out.get(key) or "")
+        if current in rewritten:
+            out[key] = rewritten[current]
+    logger.info("content_images_pushed_to_site", count=len(rewritten))
+    return out
+
+
 def _publish_via_plugin(
     store: ContentStore,
     code: str,
@@ -2219,11 +2673,31 @@ def _publish_via_plugin(
     falls back to the legacy path - best-effort, never crashing the approve). On
     success the job goes ``publishing -> done`` with the WordPress permalink + edit
     link stored, and the reviewer is pointed at the WP draft to publish it there."""
-    result = publisher.publish(_plugin_payload(row, draft_md, title, settings=settings))
+    payload = _plugin_payload(row, draft_md, title, settings=settings)
+    # PUSH THE PICTURES BEFORE THE PAGE, when the site will take them. See
+    # `_push_local_images`: the alternative is sending URLs and hoping the client's server
+    # can reach ours, which it cannot from a laptop or a private network, and which fails
+    # SILENTLY - the post lands, the operator is told it was pushed, and every image 404s.
+    payload = _push_local_images(payload, publisher, settings)
+    payload_html = str(payload.get("content") or "")
+    result = publisher.publish(payload)
     where = result.edit_url or result.url
     stage = "Pushed to WordPress (draft) — publish it on the site"
     if where:
         stage = f"{stage}: {where}"
+    # THE IMAGES ARE SENT AS URLS, AND A URL THE CLIENT'S SERVER CANNOT FETCH IS A PAGE
+    # FULL OF BROKEN PICTURES. The plugin sideloads the featured image by URL and leaves
+    # the body's <img> tags exactly as written, so both depend on PUBLIC_FILE_BASE_URL
+    # being an origin the SITE can reach. On a laptop it is 127.0.0.1, which resolves on
+    # the client's server to the client's own machine - the sideload fails silently (the
+    # plugin swallows it) and every body image 404s for every visitor.
+    #
+    # Found by pushing a real page to a real site from a dev box: the post landed, the
+    # operator was told "Pushed to WordPress", and nothing said the pictures could not
+    # travel. Saying so on the row is the whole fix - the push itself is still correct
+    # and the text is intact.
+    if _images_unreachable(payload_html, settings):
+        stage = f"{stage} (images will not load: they point at a local address)"
     store.update(
         code,
         {
@@ -2232,6 +2706,11 @@ def _publish_via_plugin(
             "wp_post_id": str(result.post_id),
             "wp_url": result.url,
             "wp_edit_url": result.edit_url,
+            # PUBLISH PROVENANCE (0158). The plugin's REST surface is `/publish` + `/ping`
+            # and reads no post, so there is no remote modified time to record - which is
+            # exactly why the republish guard asks for a confirmation on this path rather
+            # than inferring that nothing changed from a value it never had.
+            **_publish_provenance(payload_html, ""),
         },
     )
     _emit_content_deliverable(row, artifact_key=None)  # pushed to WP; no local artifact
@@ -2437,10 +2916,16 @@ def _publish_via_rest(
     """
     existing = row.get("wp_post_id")
     wp_post_id = int(existing) if existing is not None and str(existing).isdigit() else None
-    seo = _seo_fields(row, draft_md, title)
+    # DID THE CLIENT EDIT THIS PAGE SINCE WE WROTE IT? Asked BEFORE the push, because
+    # afterwards the answer is gone - the update sets a new modified time. The endpoint
+    # already required a human to confirm the overwrite (0158); this is the record of what
+    # was actually overwritten, which the confirmation dialog could only warn about.
+    overwrote = _remote_changed_since_publish(row, site_url, publisher, wp_post_id)
+    rest_body = _shape_body_html(row, draft_md)
+    seo = _seo_fields(row, draft_md, title, body_html=rest_body)
     post = PostDraft(
         title=title,
-        content=_shape_body_html(row, draft_md),
+        content=rest_body,
         # Push as a DRAFT: AIOS already ran the QA gate + human approval, but the final
         # go-live stays with the client in wp-admin (safer on a live site, and matches
         # the AIOS Publisher plugin path which also drafts). Flip to "publish" only if
@@ -2461,13 +2946,25 @@ def _publish_via_rest(
     # ContentJob has no dedicated url column; the stage label carries it). It lands as a
     # DRAFT in wp-admin for the client to publish.
     stage = f"Draft on WordPress: {result.url}" if result.url else "Draft on WordPress"
+    if overwrote:
+        # On the wire-visible stage, not only in the log: the person who has to tell the
+        # client what happened is reading the dashboard.
+        stage = f"{stage} — replaced an edit made on the site ({overwrote})"
+        logger.warning("content_republish_overwrote_remote_edit", code=code, modified=overwrote)
     note = result.dropped_note()
     if note:
         # On the stage line rather than only in the log: the operator deciding whether
         # this client's delivery is complete reads the dashboard, not the worker log.
         stage = f"{stage} — {note}"
         logger.warning("content_wp_seo_fields_dropped", code=code, dropped=list(result.dropped))
-    store.update(code, {"status": "done", "stage": stage, "wp_post_id": str(result.post_id)})
+    store.update(code, {
+        "status": "done", "stage": stage, "wp_post_id": str(result.post_id),
+        # PUBLISH PROVENANCE (0158): what we sent, and the post's own modified time as
+        # WordPress reported it. The next re-push compares these to tell whether it is
+        # about to overwrite an edit the client made themselves - the republish guard
+        # cannot ask that question without them.
+        **_publish_provenance(post.content, result.remote_modified),
+    })
     _emit_content_deliverable(row, artifact_key=None)  # pushed to WP; no local artifact
     logger.info("content_drafted_wp", code=code, wp_post_id=result.post_id)
     reason = "drafted to WordPress" if not note else f"drafted to WordPress; {note}"
@@ -2541,6 +3038,51 @@ def _publish_artifact(
         pdf_key=pdf_key,
         md_key=md_key,
     )
+
+
+def _remote_changed_since_publish(
+    row: dict[str, Any], site_url: str, publisher: Any, wp_post_id: int | None
+) -> str:
+    """The live post's modified time, IF it differs from the one we recorded. Else "".
+
+    Answers one question and refuses to guess at it. Returns "" - meaning "no evidence of a
+    change" - whenever the question cannot be answered: no previous push, no recorded
+    modified time, a transport that cannot read a post, or a read that failed. That is not
+    the same as "unchanged", and nothing downstream treats it as such: the republish
+    endpoint has already required a human to confirm the overwrite precisely because this
+    check is not available on every transport.
+
+    Never raises. A publish must not fail because a diagnostic read did.
+    """
+    stored = str(row.get("published_remote_modified") or "")
+    if not stored or wp_post_id is None:
+        return ""
+    reader = getattr(publisher, "get_post", None)
+    if not callable(reader):
+        return ""
+    try:
+        post = reader(site_url, wp_post_id, "edit")
+    except Exception as exc:
+        logger.info("content_remote_state_unreadable", error=type(exc).__name__)
+        return ""
+    current = str((post or {}).get("modified_gmt") or (post or {}).get("modified") or "")
+    return current if current and current != stored else ""
+
+
+def _publish_provenance(body_html: str, remote_modified: str) -> dict[str, Any]:
+    """The three provenance fields to write on a successful push (0158).
+
+    The hash is of the body WE SENT, so a later push can say "the page on the site is not
+    the page we wrote" without keeping a second copy of every page. ``remote_modified`` is
+    WordPress's own string and is stored verbatim for an EQUALITY check later - parsing it
+    into a timestamp would invite a comparison across timezones that looks right and is
+    not.
+    """
+    return {
+        "published_body_hash": hashlib.sha256(body_html.encode("utf-8")).hexdigest(),
+        "published_remote_modified": remote_modified or None,
+        "published_at": datetime.now(UTC),
+    }
 
 
 def _safe_stage(store: ContentStore, code: str, stage: str) -> None:

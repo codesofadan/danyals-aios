@@ -28,7 +28,6 @@ import {
   useContentJob,
   useContentKeywords,
   useContentLinks,
-  useContentQa,
   useRepublishJob,
   useReviewContentJob,
 } from "@/lib/hooks/content";
@@ -37,7 +36,7 @@ import StageTimeline, { type Stage } from "@/components/ui/StageTimeline";
 import ConfirmDialog from "@/components/ui/ConfirmDialog";
 import Modal from "@/components/ui/Modal";
 import QueryGuard from "@/components/ui/QueryGuard";
-import { qaVerdict } from "@/lib/content";
+import { useReviewFlags } from "@/lib/hooks/content";
 import ExperiencePanel from "./ExperiencePanel";
 import { useToast } from "@/components/ui/Toast";
 import ReviewPreview from "./ReviewPreview";
@@ -90,7 +89,6 @@ export default function ContentJobDetail({ code }: { code: string }) {
   const router = useRouter();
   const toast = useToast();
   const jobQ = useContentJob(code);
-  const qaQ = useContentQa(code);
   const keywordsQ = useContentKeywords(code);
   const linksQ = useContentLinks(code);
   const review = useReviewContentJob();
@@ -101,9 +99,13 @@ export default function ContentJobDetail({ code }: { code: string }) {
   const [editing, setEditing] = useState(false);
 
   const job = jobQ.data;
-  const qa = qaQ.data?.qa ?? null;
-  // Scored only when a real number came back; see qaVerdict.
-  const verdict = qaVerdict(qa);
+  // NAMED PROBLEMS, NOT A SCORE (operator's decision, 2026-09-26). The weighted total is
+  // no longer shown to a reviewer: its own module declares the threshold uncalibrated, so
+  // the number reads like a verdict it cannot support. The deterministic detections behind
+  // it are not provisional, and those are what a reviewer can act on.
+  const flagsQ = useReviewFlags(code);
+  const flags = flagsQ.data?.flags ?? [];
+  const problems = flags.filter((f) => f.kind === "problem");
 
   // The CSV the operator asked for: the job's keyword map + internal links +
   // entity coverage, one file, built from data already on screen.
@@ -156,7 +158,11 @@ export default function ContentJobDetail({ code }: { code: string }) {
   // Only a REAL verdict can fail. An unscored page is not a failed one, and
   // making the operator type PUBLISH for a failure nobody measured is the
   // over-confirmation that trains people to click through the dialogs that matter.
-  const qaFailed = verdict !== null && !verdict.passed;
+  // Typing PUBLISH is reserved for a draft that tripped a DOCTRINE FLOOR - an ungrounded
+  // claim, no first-hand experience. A note (readability, linking) is worth showing and not
+  // worth an over-confirmation: the dialogs that ask for everything are the ones people
+  // learn to click through.
+  const qaFailed = problems.length > 0;
 
   return (
     <>
@@ -175,12 +181,18 @@ export default function ContentJobDetail({ code }: { code: string }) {
           { label: "Words", value: job.words ? job.words.toLocaleString() : "—" },
           { label: "Cost", value: `$${job.cost.toFixed(2)}` },
           {
-            label: "QA",
-            // Unscored is not "failed". `qa_score` is `{}` when the gate produced
-            // no verdict, and `{}` is truthy - this used to render "NaN · failed".
-            value: verdict
-              ? `${Math.round(verdict.total)} · ${verdict.passed ? "passed" : "failed"} (advisory)`
-              : "not scored",
+            label: "Checks",
+            // What the automated checks FOUND, not a score. "Nothing flagged" is the
+            // common case for a good draft and is worth saying plainly; a count of real
+            // problems is actionable in a way a number out of 100 never was.
+            value: flagsQ.isLoading
+              ? "checking…"
+              : flags.length === 0
+                ? "nothing flagged"
+                : `${problems.length} problem${problems.length === 1 ? "" : "s"}` +
+                  (flags.length > problems.length
+                    ? `, ${flags.length - problems.length} note${flags.length - problems.length === 1 ? "" : "s"}`
+                    : ""),
           },
         ]}
         actions={
@@ -247,17 +259,32 @@ export default function ContentJobDetail({ code }: { code: string }) {
         tone={qaFailed ? "danger" : "caution"}
         title="Approve and publish this draft?"
         body={
-          <QueryGuard queries={[qaQ]} label="the QA verdict" minHeight={60}>
-            {verdict ? (
+          <QueryGuard queries={[flagsQ]} label="the automated checks" minHeight={60}>
+            {flags.length === 0 ? (
               <>
-                The QA scorecard reads <b>{Math.round(verdict.total)} / 100</b> —{" "}
-                <b>{verdict.passed ? "passed" : "FAILED"}</b>
-                {qa?.provisional ? " (provisional weights)" : ""}. It is advisory: your
-                approval is the gate, and the page publishes to{" "}
-                <b>{job.client}</b>&apos;s live site.
+                The automated checks raised nothing on this draft. Your read is the gate,
+                and the page publishes to <b>{job.client}</b>&apos;s live site.
               </>
             ) : (
-              <>No QA scorecard is stored for this draft. Your approval is the only gate.</>
+              <>
+                <div>
+                  This draft publishes to <b>{job.client}</b>&apos;s live site with the
+                  following raised:
+                </div>
+                {flags.map((f) => (
+                  <div
+                    key={f.key}
+                    style={{
+                      marginTop: 8,
+                      paddingLeft: 10,
+                      borderLeft: `3px solid ${f.kind === "problem" ? "var(--crit)" : "var(--warn)"}`,
+                    }}
+                  >
+                    <b>{f.title}</b>
+                    <div className="cs">{f.detail}</div>
+                  </div>
+                ))}
+              </>
             )}
           </QueryGuard>
         }

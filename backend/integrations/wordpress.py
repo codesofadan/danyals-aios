@@ -35,8 +35,11 @@ ONCE by the caller, and every transport pushes as much of it as its protocol all
 
 * REST sends ``excerpt``, the ``post_tag`` ids it resolved from the tag names, and the
   SEO-plugin post meta - then CHECKS the returned ``meta`` (see the silent-drop
-  paragraph above) rather than trusting the 200. It cannot carry the featured image
-  (``featured_media`` takes a media id, and sideloading is unbuilt) or the JSON-LD.
+  paragraph above) rather than trusting the 200. Since 2026-09-26 it ALSO uploads the
+  hero image and every in-body image into the site's own media library and sets
+  ``featured_media`` from the returned attachment id, so a published page stops depending
+  on the AIOS image host; a failed upload degrades to the old drop note for that one
+  image. It still cannot carry the JSON-LD.
 * XML-RPC sends ``post_excerpt``, tags by name via ``terms_names``, and the
   non-protected SEO meta via ``custom_fields``. It cannot carry Yoast's protected
   ``_yoast_wpseo_*`` keys (core's ``add_post_meta`` cap check refuses them), the
@@ -79,11 +82,15 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import re
 from dataclasses import dataclass
 from typing import Any, Protocol, runtime_checkable
 
+from app.logging_setup import get_logger
 from integrations.errors import ProviderCallError, ProviderNotConfiguredError
 from integrations.http_client import HttpProviderClient
+
+logger = get_logger("integrations.wordpress")
 
 _INSTALL_HINT = (
     "pass a WordPress username + application password (per-site, from the vault) "
@@ -97,6 +104,13 @@ BROWSER_UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 )
+
+#: Every ``<img src>`` in a post body, so the REST publish path can upload each image into
+#: the client's own media library and rewrite the body to the local copy. Matches the
+#: attribute rather than parsing HTML: the bodies this path sends are emitted by our own
+#: renderers, so the shape is known, and a dependency on an HTML parser to find an
+#: attribute would be a heavier promise than the job needs.
+_IMG_SRC_RE = re.compile(r"""<img\b[^>]*?\ssrc=["']([^"']+)["']""", re.IGNORECASE)
 
 
 # --------------------------------------------------------------------------- #
@@ -198,6 +212,11 @@ class PublishResult:
     post_id: int
     url: str
     dropped: tuple[str, ...] = ()
+    #: The post's own modified time as WordPress reported it on THIS push
+    #: (``modified_gmt``). Recorded on the job so the NEXT push can tell whether the page
+    #: changed on the client's side in between - an exact answer where comparing rendered
+    #: bodies would be a guess. Empty when the transport cannot report it.
+    remote_modified: str = ""
 
     def dropped_note(self) -> str:
         """One operator-facing sentence for ``dropped``; ``""`` at full parity."""
@@ -393,6 +412,109 @@ class WordPressClient(HttpProviderClient):
         note = seo_limit_note("app_password")
         return True, f"{detail} - {note}" if note else detail
 
+    # --- Media: put the images on the CLIENT'S site, not ours ---------------- #
+    #
+    # WHY THIS EXISTS. Generated hero and section images are hosted by the platform and
+    # embedded by URL, so a page published through this transport kept pointing at our
+    # server forever: the client's media library stayed empty, their published page
+    # borrowed our bandwidth, and the day that host or path changes their live pages lose
+    # every picture. The AIOS Publisher plugin path has always sideloaded images into the
+    # client's library; this transport reported it as a DROPPED capability ("sideloading is
+    # unbuilt") and shipped the page anyway.
+    #
+    # It is built now, and it is still best-effort per image: one failed upload leaves that
+    # one image pointing at its original URL rather than failing a publish that is
+    # otherwise fine. A page with one hotlinked image is worth far more than no page.
+
+    #: How many distinct body images one publish will upload. A bound, not a guess: each
+    #: upload is a blocking download plus a blocking POST, and a pathological draft must
+    #: not turn one publish into dozens of round trips.
+    MAX_BODY_IMAGES = 12
+
+    def upload_media(
+        self, site_url: str, image_url: str, *, filename: str = ""
+    ) -> tuple[int, str] | None:
+        """Fetch one image and upload it into the site's media library.
+
+        Returns ``(attachment_id, local_url)``, or ``None`` when anything at all went
+        wrong - a source that will not serve, a credential without upload rights, a
+        response without an id. Never raises: every caller here is in the middle of a
+        publish that must survive a failed picture.
+
+        The attachment id matters as much as the URL: ``featured_media`` takes an id, and
+        WordPress only generates responsive sizes for an attachment it owns.
+        """
+        source = (image_url or "").strip()
+        if not source.lower().startswith(("http://", "https://")):
+            return None
+        try:
+            fetched = self._client.get(source)
+            if fetched.status_code >= 400 or not fetched.content:
+                return None
+            content_type = str(fetched.headers.get("content-type") or "image/png").split(";")[0]
+            if not content_type.startswith("image/"):
+                return None
+            name = filename or source.rstrip("/").rsplit("/", 1)[-1] or "image.png"
+            # WordPress derives the attachment from the upload's own filename, and refuses
+            # one it cannot map to an allowed type - so a URL with no extension gets one
+            # from the content type rather than being rejected at the far end.
+            if "." not in name:
+                name = f"{name}.{content_type.split('/', 1)[1] or 'png'}"
+            endpoint = f"{site_url.rstrip('/')}/wp-json/wp/v2/media"
+            response = self._client.post(
+                endpoint,
+                content=fetched.content,
+                headers={
+                    "Content-Type": content_type,
+                    "Content-Disposition": f'attachment; filename="{name}"',
+                },
+                auth=self._auth,
+            )
+            if response.status_code >= 400:
+                # Stripped path only, never the body or headers: a WordPress error page
+                # can echo request detail, and this request carried the credential.
+                logger.warning(
+                    "wordpress_media_upload_failed",
+                    status=response.status_code,
+                    path=str(response.request.url).split("?", 1)[0],
+                )
+                return None
+            payload = response.json()
+        except Exception as exc:  # transport, decode, anything: this image is skipped
+            logger.warning("wordpress_media_upload_error", error=type(exc).__name__)
+            return None
+        if not isinstance(payload, dict):
+            return None
+        media_id = payload.get("id")
+        local = payload.get("source_url")
+        if not isinstance(media_id, int) or not isinstance(local, str) or not local:
+            return None
+        return media_id, local
+
+    def localise_body_images(self, site_url: str, content: str) -> tuple[str, int]:
+        """Upload every distinct ``<img src>`` in the body and rewrite it. ``(html, count)``.
+
+        Ordered and de-duplicated: an image used twice is uploaded once and both
+        occurrences are rewritten together. Capped at :attr:`MAX_BODY_IMAGES`; anything
+        past the cap keeps its original URL, which is the same honest degrade as a failed
+        upload rather than a silent truncation of the page.
+        """
+        if "<img" not in content.lower():
+            return content, 0
+        urls: list[str] = []
+        for match in _IMG_SRC_RE.finditer(content):
+            url = match.group(1)
+            if url and url not in urls:
+                urls.append(url)
+        uploaded = 0
+        for url in urls[: self.MAX_BODY_IMAGES]:
+            result = self.upload_media(site_url, url)
+            if result is None:
+                continue
+            content = content.replace(url, result[1])
+            uploaded += 1
+        return content, uploaded
+
     def _post_endpoint(self, site_url: str, post_id: int) -> str:
         return f"{site_url.rstrip('/')}/wp-json/wp/v2/posts/{post_id}"
 
@@ -508,9 +630,13 @@ class WordPressClient(HttpProviderClient):
 
     def publish(self, site_url: str, post: PostDraft) -> PublishResult:
         endpoint = f"{site_url.rstrip('/')}/wp-json/wp/v2/posts"
+        # THE IMAGES GO TO THE CLIENT'S LIBRARY FIRST. Done before the post body is sent,
+        # because the body has to carry the LOCAL urls - rewriting them afterwards would
+        # mean a second update and a window in which the live page hotlinks our host.
+        content, localised = self.localise_body_images(site_url, post.content)
         body: dict[str, object] = {
             "title": post.title,
-            "content": post.content,
+            "content": content,
             "status": post.status,
         }
         if post.slug:
@@ -545,7 +671,14 @@ class WordPressClient(HttpProviderClient):
                         + " (the term does not exist and this credential may not create one)"
                     )
             if seo.featured_image_url:
-                dropped.append(_DROP_REST_FEATURED_IMAGE)
+                # Uploaded and SET, where it used to be reported as dropped. The id is
+                # what `featured_media` takes; a failed upload falls back to the honest
+                # drop note, so the operator still learns the hero did not land.
+                media = self.upload_media(site_url, seo.featured_image_url)
+                if media is not None:
+                    body["featured_media"] = media[0]
+                else:
+                    dropped.append(_DROP_REST_FEATURED_IMAGE)
             if seo.schema_jsonld:
                 dropped.append(_DROP_REST_SCHEMA)
         # Idempotent: an existing post id -> POST to /posts/{id} (WP treats POST to a
@@ -557,7 +690,15 @@ class WordPressClient(HttpProviderClient):
         if not isinstance(post_id, int) or not isinstance(link, str):
             raise ProviderCallError("WordPress response missing post id or link")
         dropped.extend(_unlanded_seo_meta(sent_meta, data.get("meta")))
-        return PublishResult(post_id=post_id, url=link, dropped=tuple(dropped))
+        if localised:
+            logger.info("wordpress_body_images_localised", count=localised)
+        modified = data.get("modified_gmt") or data.get("modified") or ""
+        return PublishResult(
+            post_id=post_id,
+            url=link,
+            dropped=tuple(dropped),
+            remote_modified=str(modified) if isinstance(modified, str) else "",
+        )
 
 
 class XmlRpcWordPressPublisher:

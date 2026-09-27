@@ -24,18 +24,28 @@ from app.core.pagination import PageDep
 from app.core.ratelimit import rate_limit
 from app.db.database import DatabaseNotConfiguredError, get_admin_pool, privileged_connection
 from app.db.portal_repo import PortalRepo, PortalRepoDep
+from app.modules.content_experience.router import fmt_day, resume_held_pages
 from app.routers.audits import ArtifactStoreDep, AuditEnqueuerDep
 from app.schemas.audits import PortalAuditCreate, PortalAuditResponse
 from app.schemas.milestones import ClientProjectResponse
 from app.schemas.portal import ClientDashboard
+from app.schemas.portal_content import (
+    PortalContentJobResponse,
+    PortalExperienceAnswers,
+    PortalExperienceResponse,
+    PortalExperienceSlot,
+    PortalExperienceSummary,
+)
 from app.schemas.portal_deliverables import ClientDeliverableResponse
 from app.schemas.portal_reports import PortalReportResponse
 from app.schemas.portal_requests import ClientRequestResponse, PortalRequestCreate
 from app.schemas.threads import MessageCreate, PortalMessageResponse
+from app.services import client_experience
 from app.services.audit_artifacts import REPORT_HTML_VIEW_HEADERS, LocalArtifactStore
 from app.services.audit_sheets import SHEET_FILES, sheet_media_type
 from app.services.client_audits import AuditInserter, create_client_audit, insert_audit_row
 from app.services.client_requests import RequestInserter, create_client_request, insert_request_row
+from app.services.experience_options import PriorAnswer, evidence_from, options_for_all
 from app.services.portal_threads import list_own_messages, post_client_message
 from app.services.report_viz import build_report_viz
 
@@ -50,6 +60,11 @@ _DELIVERABLE_NOT_FOUND = HTTPException(
 )
 _PROJECT_NOT_FOUND = HTTPException(
     status_code=status.HTTP_404_NOT_FOUND, detail="Project not found"
+)
+# A job belonging to ANOTHER client gets this same answer as a job that does not exist:
+# the portal must not be usable to probe for other tenants' page codes.
+_CONTENT_JOB_NOT_FOUND = HTTPException(
+    status_code=status.HTTP_404_NOT_FOUND, detail="Page not found"
 )
 _DB_NOT_CONFIGURED = HTTPException(
     status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Database is not configured"
@@ -468,3 +483,150 @@ async def post_portal_request_message(
     if posted is None:
         raise _REQUEST_NOT_FOUND
     return PortalMessageResponse.from_row(posted)
+
+
+# --------------------------------------------------------------------------- #
+# Content: what the client may see, and the one thing only they can answer
+# --------------------------------------------------------------------------- #
+# READ-ONLY, by decision (2026-09-26). The client sees the stage each page is at and
+# where it published; a lead remains the only approver, so there is no mutation here
+# beyond answering the Experience questions - which is not a content mutation at all,
+# it is the client supplying their own facts.
+@router.get("/content", response_model=list[PortalContentJobResponse])
+async def list_portal_content(
+    reader: PortalRepoDep, page: PageDep, _client: CurrentClientDep
+) -> list[PortalContentJobResponse]:
+    """The caller's own content pages (newest first), through the client-safe view."""
+    rows = await asyncio.to_thread(
+        reader.list_content_jobs, limit=page.limit, offset=page.offset
+    )
+    return [PortalContentJobResponse.from_row(r) for r in rows]
+
+
+@router.get("/experience", response_model=list[PortalExperienceSummary])
+async def list_portal_experience(client: CurrentClientDep) -> list[PortalExperienceSummary]:
+    """Every page of the client's that is waiting on their answers.
+
+    The portal's own to-do list. Without it the client has to be TOLD which page codes
+    to open - by a person, in a message - which is exactly the work this surface removes.
+    """
+    rows = await asyncio.to_thread(client_experience.open_questions_for_client, client.client_id)
+    return [PortalExperienceSummary.from_row(r) for r in rows]
+
+
+@router.get("/experience/{code}", response_model=PortalExperienceResponse)
+async def get_portal_experience(
+    code: str, client: CurrentClientDep
+) -> PortalExperienceResponse:
+    """The client's own Experience questions for one page, with pickable options.
+
+    The tenant is pinned from the session, so a code belonging to another client is a
+    404 - the same answer as a code that does not exist, which is what stops the portal
+    being used to probe for other tenants' job codes.
+    """
+    return await asyncio.to_thread(_portal_experience_body, code, client.client_id)
+
+
+@router.put(
+    "/experience/{code}",
+    response_model=PortalExperienceResponse,
+    dependencies=[Depends(rate_limit("portal_experience_answer", 60))],
+)
+async def put_portal_experience(
+    code: str,
+    body: PortalExperienceAnswers,
+    client: CurrentClientDep,
+) -> PortalExperienceResponse:
+    """Record the CLIENT's answers to their own Experience questions.
+
+    Attested as theirs (``source='client'`` plus the portal user id), because the whole
+    value of a client-supplied fact is that the client stands behind it. Unknown slot
+    keys are refused rather than ignored: the pipeline decides which proof categories a
+    page needs, and a caller inventing a key could otherwise mark a dossier complete
+    without answering what was asked.
+
+    A completed dossier resumes the held pages, exactly as when staff answer.
+    """
+    job = await asyncio.to_thread(client_experience.job_for_client, code, client.client_id)
+    if job is None:
+        raise _CONTENT_JOB_NOT_FOUND
+    found = await asyncio.to_thread(client_experience.dossier_for_client_job, job)
+    if found is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This page has no questions yet - it has not started.",
+        )
+    dossier, slots = found
+    known = {str(row["slot_key"]) for row in slots}
+    unknown = sorted({a.slot_key for a in body.answers} - known)
+    if unknown:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"unknown Experience slots: {', '.join(unknown)}",
+        )
+    status_now = await asyncio.to_thread(
+        client_experience.answer_slots_as_client,
+        str(dossier["id"]),
+        [a.as_row() for a in body.answers],
+        # The PORTAL USER who attested it. CurrentClient wraps the user row plus the
+        # server-pinned tenant, so the identity lives on `.user`.
+        actor_id=client.user.id,
+    )
+    out = await asyncio.to_thread(_portal_experience_body, code, client.client_id)
+    if status_now == "complete":
+        out.resumed = resume_held_pages(code)
+    return out
+
+
+def _portal_experience_body(code: str, client_id: str) -> PortalExperienceResponse:
+    """Build the client-facing questionnaire payload. Blocking; callers offload it.
+
+    Shares the OPTION ENGINE with the staff route rather than re-deriving suggestions:
+    the client and the operator must never be shown a different set of choices for the
+    same question, and one function is the only way to guarantee that.
+    """
+    job = client_experience.job_for_client(code, client_id)
+    if job is None:
+        raise _CONTENT_JOB_NOT_FOUND
+    found = client_experience.dossier_for_client_job(job)
+    if found is None:
+        return PortalExperienceResponse(
+            code=code, status="not_started", cluster_key="", topic=str(job.get("topic") or ""),
+            slots=[],
+        )
+    dossier, slots = found
+    prior = tuple(
+        PriorAnswer(
+            slot_key=str(row.get("slot_key") or ""),
+            answer=str(row.get("answer") or ""),
+            cluster_key=str(row.get("cluster_key") or ""),
+            answered_on=fmt_day(row.get("answered_at")),
+        )
+        for row in client_experience.prior_answers_for_client(
+            client_id, exclude_dossier_id=str(dossier["id"])
+        )
+    )
+    facts = client_experience.client_facts(client_id) or {}
+    # The client's own blurb, as site copy: their words about themselves. The trading year
+    # is `clients.since_year` and arrives on the same row - there is no second founding-year
+    # column to reconcile (an earlier version reconciled one that does not exist).
+    site_copy = tuple(
+        str(facts.get(field) or "")
+        for field in ("description",)
+        if str(facts.get(field) or "").strip()
+    )
+    pack = job.get("source_pack") if isinstance(job.get("source_pack"), dict) else {}
+    evidence = evidence_from(
+        client=facts, source_pack=pack or {}, site_copy=site_copy, prior=prior
+    )
+    options = options_for_all(tuple(str(s["slot_key"]) for s in slots), evidence)
+    return PortalExperienceResponse(
+        code=code,
+        status=str(dossier.get("status") or "empty"),
+        cluster_key=str(dossier.get("cluster_key") or ""),
+        topic=str(job.get("topic") or ""),
+        slots=[
+            PortalExperienceSlot.from_row(row, options.get(str(row["slot_key"]), []))
+            for row in slots
+        ],
+    )

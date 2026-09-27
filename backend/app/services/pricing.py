@@ -75,6 +75,50 @@ def anthropic_cost(
     return round(cost, 6)
 
 
+#: Anthropic's prompt-cache multipliers against the model's INPUT price. A cached
+#: prefix is billed at 1.25x when it is written and 0.1x when it is read - which is
+#: why `anthropic_cost` above, reading `input_tokens` alone, is wrong in BOTH
+#: directions on any cached call: it misses the write surcharge and it misses the
+#: read discount. `LLMResult` has carried the two counts since the doctrine cost
+#: model was found to be 30% low; this is the function that finally prices them.
+_CACHE_WRITE_MULTIPLIER = 1.25
+_CACHE_READ_MULTIPLIER = 0.10
+
+
+def anthropic_cost_cached(
+    settings: Settings,
+    *,
+    model: str,
+    input_tokens: int,
+    output_tokens: int,
+    cache_write_tokens: int = 0,
+    cache_read_tokens: int = 0,
+) -> float:
+    """ACTUAL Anthropic spend for one call INCLUDING its prompt-cache accounting.
+
+    The API reports cached prefix tokens separately from ``input_tokens`` (which counts
+    only the uncached remainder), so the four counts are additive rather than
+    overlapping::
+
+        input x in_price
+      + cache_write x in_price x 1.25
+      + cache_read  x in_price x 0.10
+      + output x out_price
+
+    Passing zeros for the cache counts makes this identical to :func:`anthropic_cost`,
+    so it is a safe replacement at any call site - and the RIGHT one wherever a
+    ``LLMResult`` is in hand, because that struct always carries the counts.
+    """
+    in_price, out_price = anthropic_prices(settings, anthropic_tier(model))
+    cost = (
+        max(input_tokens, 0) * in_price
+        + max(cache_write_tokens, 0) * in_price * _CACHE_WRITE_MULTIPLIER
+        + max(cache_read_tokens, 0) * in_price * _CACHE_READ_MULTIPLIER
+        + max(output_tokens, 0) * out_price
+    ) / _MTOK
+    return round(cost, 6)
+
+
 def serper_cost(settings: Settings, *, queries: int = 1) -> float:
     """ACTUAL Serper spend = number of queries issued x the per-query price."""
     return round(max(queries, 0) * settings.price_serper_per_query, 6)

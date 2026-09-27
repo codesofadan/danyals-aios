@@ -25,12 +25,14 @@ import html
 import logging
 from collections.abc import Sequence
 from dataclasses import asdict, dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from app.db.database import privileged_connection
 from app.services import report_pdf
 from app.services.audit_artifacts import REPORT_PDF_NAME
+from app.services.audit_compare import compare as compare_runs
 from app.services.branding import Brand, brand
 
 log = logging.getLogger(__name__)
@@ -500,6 +502,10 @@ class ReportInput:
     top_findings: int = 40
     #: The brand. Resolved from `branding.json` when absent.
     brand: Brand | None = None
+    #: What changed since the previous audit of this site (``audit_compare.compare``),
+    #: or None when this is the first run - in which case the section omits itself
+    #: rather than printing an empty "progress" heading.
+    comparison: dict[str, Any] | None = None
 
 
 def _sec(n: str, title: str, sub: str = "") -> str:
@@ -518,7 +524,16 @@ def _score_text(r: dict[str, Any]) -> str:
 
 
 def _cov(r: dict[str, Any]) -> str:
-    return f"ran {r.get('checks_ran', 0)} of {r.get('checks_applicable', 0)} checks"
+    """The coverage line: what ran out of what, and - for an unmeasured row - WHY.
+
+    "not measured (0 of 80 checks)" is true and unactionable; four different situations
+    produce it, and only one of them is a configuration the agency should fix (0159). The
+    reason is only ever present on a row that HAS no score, so this cannot put a caveat
+    beside a real number.
+    """
+    base = f"ran {r.get('checks_ran', 0)} of {r.get('checks_applicable', 0)} checks"
+    reason = str(r.get("not_measured_reason") or "").strip()
+    return f"{base} - {reason}" if reason else base
 
 
 #: Words `str.title()` and `str.capitalize()` get wrong. These reach a client
@@ -632,6 +647,25 @@ def render(data: ReportInput) -> str:
     )
     o.append("</div></div>")
 
+    # ---- the crawl verdict, BEFORE anything the reader could misread ---------
+    #
+    # A blocked crawl makes every number below a statement about our ACCESS rather than
+    # about the site (0160). It goes at the top, ahead of the executive summary, because a
+    # caveat printed after the findings is a caveat nobody reads - and this one changes
+    # what the whole document means. Nothing is emitted for a clean run.
+    verdict = str(m.get("crawl_verdict") or "")
+    note = str(m.get("crawl_note") or "")
+    if verdict in ("blocked", "thin") and note:
+        title = (
+            "We could not fully reach this site" if verdict == "blocked"
+            else "This run saw part of the site"
+        )
+        o.append(
+            f'<div class="note" style="border-left:4px solid '
+            f'{CRIT if verdict == "blocked" else WARN}">'
+            f"<p><b>{esc(title)}.</b> {esc(note)}</p></div>"
+        )
+
     # ---- 01 executive summary ---------------------------------------------
     o.append("<section>")
     o.append(_sec("01", "Executive summary",
@@ -655,6 +689,80 @@ def render(data: ReportInput) -> str:
     if sev_counts:
         o.append('<div style="margin-top:16px">' + severity_bar(sev_counts) + "</div>")
     o.append("</section>")
+
+    # ---- 01b what changed since last time -----------------------------------
+    #
+    # THE SECTION A RETAINER IS RENEWED ON, and the one the module could not print until
+    # the comparison existed. It sits immediately after the summary and before the current
+    # scores, because "what did you fix" is the question a returning client opens the
+    # document with.
+    #
+    # It omits itself on a first audit rather than printing an empty heading, and it prints
+    # "fixed" only for findings whose check actually ran again - a finding that vanished
+    # because a shallower depth stopped looking is listed separately as not re-checked,
+    # never as work completed. That distinction is the whole reason this is safe to put in
+    # front of a client.
+    cmp_data = data.comparison or {}
+    if cmp_data.get("available") is not False and cmp_data.get("counts"):
+        counts = cmp_data.get("counts") or {}
+        o.append('<section class="brk">')
+        since = cmp_data.get("baselineWhen") or ""
+        o.append(_sec(
+            "01b", "What changed since the last audit",
+            f"Measured against the previous audit of this site{f' ({since})' if since else ''}.",
+        ))
+        o.append('<div class="kpis">')
+        for label, value, sub in (
+            ("Fixed", f"{int(counts.get('fixed') or 0):,}", "no longer found"),
+            ("New", f"{int(counts.get('new') or 0):,}", "appeared since"),
+            ("Still open", f"{int(counts.get('persisting') or 0):,}", "found in both runs"),
+            ("Not re-checked", f"{int(counts.get('unchecked') or 0):,}", "this run did not look"),
+        ):
+            o.append(
+                f'<div class="kpi"><div class="l">{esc(label)}</div>'
+                f'<div class="v">{esc(value)}</div>'
+                f'<div class="s muted small">{esc(sub)}</div></div>'
+            )
+        o.append("</div>")
+        # The score delta is printed ONLY when the two runs measured the same check set;
+        # otherwise the reason is printed in its place. Page health is printed either way -
+        # its denominator is pages, so it survives a change of check set.
+        if cmp_data.get("scoreDelta") is not None:
+            delta = float(cmp_data["scoreDelta"])
+            way = "up" if delta > 0 else ("down" if delta < 0 else "unchanged")
+            o.append(
+                f'<p class="small">Site score {esc(way)} '
+                f'{abs(delta):g} points ({cmp_data.get("scoreBefore")} to '
+                f'{cmp_data.get("scoreAfter")}).</p>'
+            )
+        elif cmp_data.get("reason"):
+            o.append(f'<p class="small muted">{esc(str(cmp_data["reason"]))}</p>')
+        if cmp_data.get("healthBefore") is not None and cmp_data.get("healthAfter") is not None:
+            o.append(
+                f'<p class="small">Pages with no critical issue: '
+                f'{num(cmp_data["healthBefore"]):g}% to {num(cmp_data["healthAfter"]):g}%.</p>'
+            )
+        for bucket, heading in (("fixed", "Fixed since last time"), ("new", "New since last time")):
+            rows = list(cmp_data.get(bucket) or [])[:12]
+            if not rows:
+                continue
+            o.append(f"<h3>{esc(heading)}</h3>")
+            o.append("<table><thead><tr><th>Issue</th><th>Severity</th>"
+                     "<th class='num'>Pages</th></tr></thead><tbody>")
+            for r in rows:
+                o.append(
+                    f'<tr><td>{esc(r.get("title") or r.get("checkId"))}</td>'
+                    f'<td>{esc(str(r.get("severity") or ""))}</td>'
+                    f'<td class="num">{int(r.get("pages") or 0):,}</td></tr>'
+                )
+            o.append("</tbody></table>")
+        if int(counts.get("unchecked") or 0):
+            o.append(
+                '<p class="small muted">Issues listed as not re-checked are NOT fixed: '
+                "this run did not measure the dimension they belong to, so nothing can be "
+                "said about them either way.</p>"
+            )
+        o.append("</section>")
 
     # ---- 02 where the site stands ------------------------------------------
     #
@@ -985,6 +1093,59 @@ def render(data: ReportInput) -> str:
 # Build from stored rows
 # --------------------------------------------------------------------------- #
 
+def _comparison_for(audit_id: str) -> dict[str, Any] | None:
+    """The delta against the previous completed audit of the same site, or None.
+
+    Privileged, like everything else this module reads: it runs inside the worker and the
+    re-ingest, neither of which has a user JWT. Never raises - a report that fails to build
+    because a progress section could not be computed would trade the whole deliverable for
+    one paragraph.
+    """
+    try:
+        with privileged_connection() as cur:
+            cur.execute(
+                """select prev.id from public.audits prev
+                   join public.audits cur on cur.id = %s
+                   where prev.url = cur.url and prev.id <> cur.id
+                     and prev.status = 'done' and prev.created_at < cur.created_at
+                   order by prev.created_at desc limit 1""",
+                (audit_id,),
+            )
+            row = cur.fetchone()
+            if row is None:
+                return None
+            before_id = str(row["id"])
+            rows: dict[str, list[dict[str, Any]]] = {}
+            for name, target in (("before", before_id), ("after", audit_id)):
+                cur.execute(
+                    """select f.* from public.audit_findings f
+                       where exists (select 1 from public.audit_finding_instances i
+                                     where i.finding_id = f.id and i.audit_id = %s)""",
+                    (target,),
+                )
+                rows[f"{name}_findings"] = [dict(r) for r in cur.fetchall()]
+                cur.execute(
+                    "select * from public.audit_rollups where audit_id = %s", (target,)
+                )
+                rows[f"{name}_rollups"] = [dict(r) for r in cur.fetchall()]
+            cur.execute(
+                "select created_at from public.audits where id = %s", (before_id,)
+            )
+            when_row = cur.fetchone()
+    except Exception:
+        log.warning("audit_report_comparison_unavailable", extra={"audit_id": audit_id})
+        return None
+    result = compare_runs(
+        before_findings=rows["before_findings"],
+        after_findings=rows["after_findings"],
+        before_rollups=rows["before_rollups"],
+        after_rollups=rows["after_rollups"],
+    ).as_dict()
+    when = (when_row or {}).get("created_at")
+    result["baselineWhen"] = when.strftime("%d %B %Y") if isinstance(when, datetime) else ""
+    return result
+
+
 def build(
     *,
     audit_id: str,
@@ -1044,10 +1205,17 @@ def build(
             )
             f["sample_urls"] = [r["url"] for r in cur.fetchall()]
 
+    # WHAT CHANGED SINCE LAST TIME. Read here rather than passed in, because the report is
+    # built from stored rows in three places (the worker, the re-ingest, the CLI) and a
+    # section that only appears on one of those paths is worse than no section. Absent or
+    # failed -> the section simply does not render: a progress claim is the last thing to
+    # guess at.
+    comparison = _comparison_for(audit_id)
+
     doc = render(ReportInput(
         meta=meta or {}, rollups=rollups, findings=findings, pages=pages,
         roadmap=dict(rm) if rm else None, roadmap_items=items,
-        top_findings=top_findings,
+        top_findings=top_findings, comparison=comparison,
     ))
     path = out / REPORT_NAME
     path.write_text(doc, encoding="utf-8")

@@ -26,6 +26,7 @@ are calendar-formatted ("Jul 08, 2026").
 
 from __future__ import annotations
 
+from datetime import date, datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -685,6 +686,16 @@ class Web2ClientIdentityRequest(BaseModel):
     #: `clearImapPassword`, so an accidental blank can never silently drop a credential.
     imap_password: str = Field(default="", alias="imapPassword", max_length=512)
     clear_imap_password: bool = Field(default=False, alias="clearImapPassword")
+    #: The ONE login this client uses across every platform (0151). Entered once by the
+    #: operator; every platform that can authenticate with a username and password uses
+    #: it directly, and every platform that cannot uses it to SIGN IN before handing back
+    #: a token. Distinct from `handleBase`, which is the public handle on a property.
+    username: str = Field(default="", max_length=128)
+    #: Write-only, sealed into the vault, never read back. Same blank-is-not-clear rule as
+    #: the mailbox password: a form that round-trips an empty field must not silently drop
+    #: the credential that unlocks every platform this client is on.
+    password: str = Field(default="", max_length=512)
+    clear_password: bool = Field(default=False, alias="clearPassword")
     #: The standing grounding pack every campaign for this client reuses. A draft
     #: written without these holds at review on [NEEDS:] gaps and cannot publish, so
     #: storing them once per client is what makes the grounded path the easy one.
@@ -706,6 +717,11 @@ class Web2ClientIdentityResponse(BaseModel):
     imap_user: str = Field(default="", serialization_alias="imapUser")
     #: Whether a mailbox password is sealed - never the password.
     imap_password_held: bool = Field(default=False, serialization_alias="imapPasswordHeld")
+    #: The shared login's username (public) and whether its password is sealed (never the
+    #: password). `connected_ready` is how many platforms that login can publish to right
+    #: now - the honest headline for a connection screen.
+    username: str = ""
+    password_held: bool = Field(default=False, serialization_alias="passwordHeld")
     #: Whether the builder can read this client's mailbox unaided. False is a normal
     #: state, not a fault: verification then degrades to the operator reading the inbox.
     mailbox_ready: bool = Field(default=False, serialization_alias="mailboxReady")
@@ -740,7 +756,161 @@ class Web2ClientIdentityResponse(BaseModel):
             imap_user=user,
             imap_password_held=password_held,
             mailbox_ready=bool(host and user and password_held),
+            username=str(row.get("web2_username") or ""),
+            # Derived from whether a vault LABEL exists, not from reading the vault: the
+            # question a connection screen asks is "is a credential held", and opening the
+            # vault to answer it would move a secret for the sake of a boolean.
+            password_held=bool(row.get("web2_password_vault_label")),
         )
+
+
+class Web2BroadcastRequest(BaseModel):
+    """Compose once, publish everywhere: one subject, a platform tick-list (or All)."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    client_id: str = Field(alias="clientId")
+    #: What the whole broadcast is about. ONE subject - the per-platform variants are
+    #: derived from it, because one topic sent verbatim to N platforms produced
+    #: byte-identical articles (measured r=1.000) that the similarity gate then blocked.
+    subject: str = Field(min_length=3, max_length=200)
+    target_url: str = Field(alias="targetUrl", max_length=2048)
+    #: The platforms to publish to, or the single token ``__all__``. An EMPTY list is
+    #: refused rather than treated as All: "none selected" and "everything" are different
+    #: intentions and a blank must never quietly mean the second.
+    platforms: list[str] = Field(default_factory=list)
+    anchors: list[str] = Field(default_factory=list)
+
+
+class Web2PlannedPostResponse(BaseModel):
+    """One platform's variant of the subject."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    platform: str
+    #: ``article`` / ``note`` / ``snippet`` / ``profile`` - what this platform will
+    #: actually receive. A 900-word article and a 29-word note are different artifacts,
+    #: not the same text shortened.
+    shape: str
+    topic: str = ""
+    angle: str = ""
+    framework: str = ""
+    word_target: int = Field(default=0, serialization_alias="wordTarget")
+    anchor: str = ""
+
+
+class Web2BroadcastPlanResponse(BaseModel):
+    """What "publish this everywhere" resolves to, BEFORE anything is drafted or paid for."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    client_id: str = Field(serialization_alias="clientId")
+    subject: str
+    summary: str
+    posts: list[Web2PlannedPostResponse] = Field(default_factory=list)
+    #: Selected platforms that will receive NOTHING, each with its reason. Reported rather
+    #: than dropped: a selection silently shrunk from twenty to six is discovered in a
+    #: report weeks later.
+    excluded: list[dict[str, str]] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)
+
+
+class PlacedLinkResponse(BaseModel):
+    """One outbound link a Web 2.0 property placed, and what became of it."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    id: str
+    client: str = ""
+    platform: str = ""
+    page_url: str = Field(default="", serialization_alias="pageUrl")
+    target_url: str = Field(default="", serialization_alias="targetUrl")
+    anchor: str = ""
+    #: ``live`` / ``removed`` / ``nofollowed`` / ``unknown``. Every value SET FROM A
+    #: FETCH - `unknown` means nobody has successfully looked, which is deliberately not
+    #: the same claim as `removed`.
+    state: str = "unknown"
+    rel: str = ""
+    first_seen_at: str = Field(default="", serialization_alias="firstSeenAt")
+    last_checked_at: str = Field(default="", serialization_alias="lastCheckedAt")
+    lost_at: str = Field(default="", serialization_alias="lostAt")
+
+    @classmethod
+    def from_row(cls, row: dict[str, Any]) -> PlacedLinkResponse:
+        def _stamp(key: str) -> str:
+            # `hasattr` does not narrow for mypy, and these columns are genuinely
+            # nullable - `lost_at` is NULL for every link that never went missing, which
+            # is the normal case rather than an edge one.
+            value = row.get(key)
+            if isinstance(value, datetime | date):
+                return str(value.isoformat())
+            return ""
+
+        return cls(
+            id=str(row.get("id") or ""),
+            client=str(row.get("client_name") or ""),
+            platform=str(row.get("platform") or ""),
+            page_url=str(row.get("page_url") or ""),
+            target_url=str(row.get("target_url") or ""),
+            anchor=str(row.get("anchor") or ""),
+            state=str(row.get("state") or "unknown"),
+            rel=str(row.get("rel") or ""),
+            first_seen_at=_stamp("first_seen_at"),
+            last_checked_at=_stamp("last_checked_at"),
+            lost_at=_stamp("lost_at"),
+        )
+
+
+class PlacedLinkBoardResponse(BaseModel):
+    """The Placed Links surface: the roll-up plus the rows that need action first."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    live: int = 0
+    removed: int = 0
+    nofollowed: int = 0
+    unknown: int = 0
+    links: list[PlacedLinkResponse] = Field(default_factory=list)
+
+    @property
+    def lost(self) -> int:
+        return self.removed + self.nofollowed
+
+
+class Web2PlatformConnectionResponse(BaseModel):
+    """One platform's answer to "can this client publish here yet?"."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    platform: str
+    #: ``ready`` / ``one_step`` / ``blocked``.
+    readiness: str
+    #: The ONE human action that moves `one_step` to `ready`, named precisely. Empty when
+    #: ready or blocked - a screen that says "Connect" and nothing else is why a client
+    #: can sit at four connected platforms indefinitely.
+    action: str = ""
+    reason: str = ""
+    missing: list[str] = Field(default_factory=list)
+
+
+class Web2ConnectionPlanResponse(BaseModel):
+    """What the client's ONE login can and cannot reach.
+
+    The honest headline for a connection screen: a number, not a yes or a no. A password
+    publishes directly on 8 of 53 platforms; 43 need an OAuth grant or a token that no
+    password substitutes for. Reporting "connected" on a password alone would promise a
+    capability the system does not have.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    client_id: str = Field(serialization_alias="clientId")
+    summary: str
+    ready_count: int = Field(default=0, serialization_alias="readyCount")
+    one_step_count: int = Field(default=0, serialization_alias="oneStepCount")
+    blocked_count: int = Field(default=0, serialization_alias="blockedCount")
+    platforms: list[Web2PlatformConnectionResponse] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)
 
 
 class Web2ProvisionStartRequest(BaseModel):

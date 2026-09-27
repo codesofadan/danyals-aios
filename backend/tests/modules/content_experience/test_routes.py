@@ -35,7 +35,40 @@ class _Repo:
         return ({"id": self._dossier_id, "status": self.status, "cluster_key": "plumbing"},
                 self._slots)
 
-    def answer_slots(self, dossier_id: str, answers: list[dict[str, Any]]) -> str:
+    # --- the three reads the OPTION LIST needs (0155) ---------------------------
+    #
+    # The questionnaire now offers pickable answers derived from what this client already
+    # gave us, so the route reads the job's grounding, the client's record, and any answer
+    # attested for another cluster. All three are deliberately EMPTY here: these tests are
+    # about what an answer may and may not do, and an option list is exercised where it is
+    # built (`tests/test_experience_options.py`). An empty evidence set must still produce a
+    # working questionnaire - that is itself the property being held.
+
+    def job_for_experience(self, code: str) -> dict[str, Any] | None:
+        return {"code": code, "client_id": None, "topic": "emergency plumbing",
+                "source_pack": {}}
+
+    def client_facts(self, client_id: str | None) -> dict[str, Any] | None:
+        return None
+
+    def prior_answers_for_client(
+        self, client_id: str | None, *, exclude_dossier_id: str | None = None
+    ) -> list[dict[str, Any]]:
+        return []
+
+    def answer_slots(
+        self,
+        dossier_id: str,
+        answers: list[dict[str, Any]],
+        *,
+        source: str = "operator",
+        actor_id: str | None = None,
+    ) -> str:
+        # `source` / `actor_id` record the ATTESTATION (who said this, and as what). Taken
+        # here so the fake matches the real signature; asserted in the attestation test
+        # below rather than ignored.
+        self.source = source
+        self.actor_id = actor_id
         self.written.extend(answers)
         by_key = {s["slot_key"]: s for s in (self._slots or [])}
         for a in answers:
@@ -52,6 +85,18 @@ class _Repo:
             "partial" if answered else "empty"
         )
         return self.status
+
+
+class _User:
+    """The signed-in staff member answering. Their id is recorded as the ATTESTATION.
+
+    The routes used to take the caller and never read it, so these tests passed None. An
+    answer is now stored with who supplied it (0155) - that is the whole difference between
+    a client-confirmed fact and an anonymous sentence - so a caller is part of the contract
+    and the fake has to be one.
+    """
+
+    id = "11111111-1111-1111-1111-111111111111"
 
 
 def _slots() -> list[dict[str, Any]]:
@@ -103,7 +148,7 @@ class TestAnsweringThemResumesTheHaltedPage:
 
         monkeypatch.setattr(mod, "run_content_pipeline_job", _Task())
         body = put_experience(
-            "CJ-4200", None, _Repo(_slots()),  # type: ignore[arg-type]
+            "CJ-4200", _User(), _Repo(_slots()),  # type: ignore[arg-type]
             [{"slot_key": "founding_date", "answer": "2011"},
              {"slot_key": "license_permit", "answer": "M-41982"}],
         )
@@ -123,7 +168,7 @@ class TestAnsweringThemResumesTheHaltedPage:
 
         monkeypatch.setattr(mod, "run_content_pipeline_job", _Task())
         body = put_experience(
-            "CJ-4200", None, _Repo(_slots()),  # type: ignore[arg-type]
+            "CJ-4200", _User(), _Repo(_slots()),  # type: ignore[arg-type]
             [{"slot_key": "founding_date", "answer": "2011"}],
         )
         assert sent == [], "a page still missing facts must stay halted"
@@ -143,7 +188,7 @@ class TestAnsweringThemResumesTheHaltedPage:
 
         monkeypatch.setattr(mod, "run_content_pipeline_job", _Task())
         body = put_experience(
-            "CJ-4200", None, _Repo(_slots()),  # type: ignore[arg-type]
+            "CJ-4200", _User(), _Repo(_slots()),  # type: ignore[arg-type]
             [{"slot_key": "founding_date", "answer": "2011"},
              {"slot_key": "license_permit", "answer": "M-41982"}],
         )
@@ -155,7 +200,7 @@ class TestAnsweringThem:
     def test_an_answer_is_recorded_and_the_status_re_derived(self) -> None:
         repo = _Repo(_slots())
         body = put_experience(
-            "CJ-4200", None, repo,  # type: ignore[arg-type]
+            "CJ-4200", _User(), repo,  # type: ignore[arg-type]
             [{"slot_key": "founding_date", "answer": "March 2011, SOS reg 0801442917"},
              {"slot_key": "license_permit", "answer": "M-41982, issued by TSBPE"}],
         )
@@ -165,7 +210,7 @@ class TestAnsweringThem:
     def test_a_partial_answer_does_not_clear_the_halt(self) -> None:
         repo = _Repo(_slots())
         body = put_experience(
-            "CJ-4200", None, repo,  # type: ignore[arg-type]
+            "CJ-4200", _User(), repo,  # type: ignore[arg-type]
             [{"slot_key": "founding_date", "answer": "March 2011"}],
         )
         assert body["status"] == "partial"
@@ -179,7 +224,7 @@ class TestAnsweringThem:
         repo = _Repo(_slots())
         with pytest.raises(HTTPException) as exc:
             put_experience(
-                "CJ-4200", None, repo,  # type: ignore[arg-type]
+                "CJ-4200", _User(), repo,  # type: ignore[arg-type]
                 [{"slot_key": "totally_made_up", "answer": "anything"}],
             )
         assert exc.value.status_code == 400

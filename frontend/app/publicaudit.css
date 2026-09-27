@@ -146,3 +146,60 @@
   .pa-upsell .fa-upsell-h { flex-wrap: wrap; }
   .pa-upsell .fa-upsell-all { margin-left: 52px; }
 }
+
+/* --- what we found / what we did not check (the two summary blocks) -------
+   Added because the page used to be a score plus an embedded report: a reader who
+   did not open the document learned nothing actionable, and a free audit's SILENCE
+   on off-page and local read exactly like a clean bill of health. Both halves are
+   now on the page itself, and they are styled as each other's opposite - findings
+   carry a severity colour, gaps are deliberately quiet and neutral, because a gap
+   is not a problem with the site. */
+.pa-h2 {
+  color: var(--fg-strong);
+  font-size: clamp(17px, 2.1vw, 21px);
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  margin: 0 0 6px;
+}
+.pa-sub { color: var(--muted); font-size: 14px; margin: 0 0 16px; max-width: 62ch; }
+
+.pa-finds { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.pa-find {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  /* The severity rail. A left border rather than a tinted card: the page is read on
+     phones, where a full tint at three severities turns into a traffic light. */
+  border-left: 4px solid var(--muted);
+  border-radius: 10px;
+  background: var(--card);
+}
+.pa-find--critical { border-left-color: var(--crit, #C2410C); }
+.pa-find--major { border-left-color: var(--warn, #A96913); }
+.pa-find--minor { border-left-color: var(--line); }
+.pa-find-sev {
+  font-size: 11.5px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+.pa-find--critical .pa-find-sev { color: var(--crit, #C2410C); }
+.pa-find--major .pa-find-sev { color: var(--warn, #A96913); }
+.pa-find-t { font-size: 15px; font-weight: 600; color: var(--ink); flex: 1 1 260px; }
+.pa-find-n { font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+.pa-gaps { background: var(--card); }
+.pa-gap-list {
+  margin: 0;
+  padding-left: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  color: var(--ink);
+  font-size: 14.5px;
+}
+.pa-gap-list li { max-width: 72ch; }

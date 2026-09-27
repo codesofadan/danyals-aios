@@ -34,6 +34,35 @@ from app.config import Settings
 # these ``<img>`` URLs with no bearer token. Keep this in lock-step with that route.
 CONTENT_IMAGE_ROUTE = "/api/v1/public/content-images"
 
+#: Suffix -> media type for everything the image host can hold. The public serving
+#: route reads this too, so a file's extension and its Content-Type are ONE decision.
+IMAGE_MEDIA_TYPES: dict[str, str] = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".webp": "image/webp",
+    ".gif": "image/gif",
+    ".avif": "image/avif",
+}
+
+#: (magic bytes, offset, suffix). Identifying an image by its CONTENT is what keeps the
+#: stored name honest when the provider's output_format changes under us.
+_MAGIC: tuple[tuple[bytes, int, str], ...] = (
+    (bytes([0x89]) + b"PNG", 0, ".png"),
+    (bytes([0xFF, 0xD8, 0xFF]), 0, ".jpg"),
+    (b"WEBP", 8, ".webp"),
+    (b"GIF8", 0, ".gif"),
+    (b"ftyp", 4, ".avif"),
+)
+
+
+def image_suffix(data: bytes) -> str:
+    """The file extension these bytes actually are. Unrecognised falls back to .png,
+    which is what every previous image was and keeps old rows resolvable."""
+    for magic, offset, suffix in _MAGIC:
+        if data[offset : offset + len(magic)] == magic:
+            return suffix
+    return ".png"
+
 
 def _trim_overlap(base_url: str, route: str) -> str:
     """Drop any leading part of ``route`` that ``base_url`` already ends with.
@@ -81,12 +110,18 @@ class LocalContentImageStore:
         self._base_url = _trim_overlap(base_url.rstrip("/"), self._route)
 
     def host_png(self, data: bytes) -> str:
-        """Persist ``data`` (PNG bytes) and return its served URL. Raises on empty
-        bytes (a caught, degrade-safe error for the generator - never a broken image)."""
+        """Persist ``data`` and return its served URL. Raises on empty bytes (a caught,
+        degrade-safe error for the generator - never a broken image).
+
+        The extension is read FROM THE BYTES, not from a caller's argument. The provider
+        decides the encoding (``output_format``), and a store that has to be TOLD can be
+        told wrong - a .png holding WebP bytes is served as image/png and renders
+        nowhere. Sniffing means the name and the content cannot disagree.
+        """
         if not data:
             raise ValueError("cannot host empty image bytes")
         self._root.mkdir(parents=True, exist_ok=True)
-        name = f"{hashlib.sha256(data).hexdigest()}.png"
+        name = f"{hashlib.sha256(data).hexdigest()}{image_suffix(data)}"
         target = self._root / name
         if not target.exists():  # content-hash name => identical bytes, identical file
             target.write_bytes(data)

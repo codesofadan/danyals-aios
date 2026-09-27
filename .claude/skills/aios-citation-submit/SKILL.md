@@ -20,7 +20,8 @@ allowed-tools: Bash(python ${CLAUDE_PROJECT_DIR}/.claude/skills/_shared/aios_cli
 **What happens (the honest version, 2026-09-02):** the campaign CLASSIFIES each
 directory and routes it. Today, with the earned-spec whitelist empty and no
 aggregator/API credentials on file, **virtually every row becomes work in your team's
-queue** (`/admin/citations/queue`, accelerated by the Citation Assistant extension) —
+queue** (worked through the Citation Assistant extension; the admin page that also
+fronted it was removed 2026-09-22) —
 every field pre-filled, and a listing counts as **Live** only after the server fetches
 its public URL and finds the business on the page. Per directory the outcomes are:
 - **Your team's queue** (`ready_for_human`) — the common case; a person finishes it

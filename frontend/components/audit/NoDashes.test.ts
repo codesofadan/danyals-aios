@@ -16,6 +16,9 @@ import { describe, expect, it } from "vitest";
 const ROOTS = [
   "components/audit",
   "components/report",
+  // Rendered ON the audit screen even though it is not filed under it: the readiness
+  // panel's copy is read in exactly the same breath as the audit's own.
+  "components/ops",
   "app/admin/audit",
   "lib/audit.ts",
   "lib/auditAltitude.ts",

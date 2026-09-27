@@ -17,7 +17,7 @@ from collections import Counter
 from typing import Any
 
 from app.modules.site_builder.schemas import slots_for_kind
-from app.services.page_blueprints import LAYOUT_VARIANTS, get_template
+from app.services.page_blueprints import CHROME_ROLES, LAYOUT_VARIANTS, get_template
 from integrations.site_analyzer import SectionSnapshot, SiteCapture, TypographySample
 
 # Heading-keyword -> section kind, in priority order (most specific first). Mirrors
@@ -36,7 +36,10 @@ _KIND_KEYWORDS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("cta", ("get started", "get in touch", "next step", "ready to", "contact us", "book ")),
 )
 _DEFAULT_CONTENT_KIND = "intro"
-_CHROME_ROLES = frozenset({"header", "nav", "footer"})
+# Imported, not redeclared: `page_blueprints` owns what counts as site chrome, and a
+# second copy here is how the two came to disagree - that module treated
+# header/nav/footer as CONTENT-bearing while this one correctly excluded them.
+_CHROME_ROLES = CHROME_ROLES
 
 
 def _classify_kind(heading: str, *, is_first: bool) -> str:

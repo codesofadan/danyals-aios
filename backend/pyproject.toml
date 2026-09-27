@@ -56,6 +56,25 @@ embeddings = [
     "voyageai>=0.2",     # Embedder (Voyage AI - Anthropic has NO embeddings API)
     "pinecone>=5",       # VectorStore (Pinecone; namespaced per entity)
 ]
+# The AI orchestration stack (06-AI-STACK.md): LangGraph for checkpointed, resumable
+# multi-step work, LangSmith for tracing every model call and graph run. KEPT OUT of the
+# core runtime deps for the same reason `embeddings` is - this is a heavy tree and a
+# major contributor to pip-resolver backtracking, and the base image + gate must stay
+# light. Nothing imports these at module scope: `app/platform/ai/graph.py` and
+# `tracing.py` lazy-import them and degrade to a linear path / no tracing when absent,
+# so omitting the extra is safe and a worker without it still publishes.
+#
+# NOT INCLUDED, DELIBERATELY: `langchain` itself. Its chat-model abstraction lags the
+# Anthropic API by weeks on exactly the features that matter here (adaptive thinking,
+# output_config.effort, cache breakpoint placement, strict tool schemas), so the model
+# call goes through our own router over the official SDK instead - see
+# `app/platform/ai/router.py`. `langchain-core` arrives as a LangGraph transitive and is
+# used only for the types LangGraph itself exposes.
+graph = [
+    "langgraph>=1.0",
+    "langgraph-checkpoint-postgres>=3.0",  # durable graph state in the SAME Postgres
+    "langsmith>=0.12",
+]
 # Headless-browser automation (site analysis / replica capture / site builder).
 # The Playwright CITATION bot was retired 2026-09-05 (off-page redesign Phase 3) -
 # this extra no longer enables any citation submission. Kept OUT of the core
@@ -102,7 +121,15 @@ target-version = "py311"
 # directory, which made `ruff check .` - the documented commit gate - permanently
 # red and therefore ignored. A gate nobody can pass is a gate nobody reads. Lint
 # the platform's own source; the corpus is third-party content that travels as-is.
-extend-exclude = ["seo-content-os"]
+# `danyals-audit-system/` is a SEPARATE PRODUCT that happens to live in this tree (its own
+# pyproject, its own venv, its own CLAUDE.md; invoked as a SUBPROCESS, never imported).
+# Linting it from here made the platform's own documented gate permanently red on 165
+# findings nobody running `ruff check .` in `backend/` is able to act on - including 8 hard
+# syntax errors, which are not errors at all in the engine's own target (it uses 3.12
+# f-string escapes; this config pins py311 for the platform). It is linted by its own gate,
+# under its own config, where the numbers mean something. Same reasoning as the corpus
+# above: a gate nobody can pass is a gate nobody reads.
+extend-exclude = ["seo-content-os", "danyals-audit-system"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "N", "UP", "B", "C4", "SIM", "RUF"]

@@ -2,7 +2,7 @@
 /**
  * Plugin Name:       AIOS Publisher
  * Description:        Receives approved content pushed from the AIOS platform and creates it as a draft you publish from WordPress. Uses its OWN endpoint + shared-key auth, so it works even when the host strips the Authorization header and Application Passwords are disabled. Ships a theme-adaptive article template so every published post looks native to the client's site.
- * Version:           1.13.0
+ * Version:           1.19.0
  * Requires at least: 5.6
  * Requires PHP:      7.2
  * Author:            AIOS
@@ -34,7 +34,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 // be plugin-root-relative: register_activation_hook() and plugins_url() lookups.
 define( 'AIOS_PUBLISHER_FILE', __FILE__ );
 
-define( 'AIOS_PUBLISHER_VERSION', '1.13.0' );
+define( 'AIOS_PUBLISHER_VERSION', '1.19.0' );
 define( 'AIOS_PUBLISHER_REST_NAMESPACE', 'aios/v1' );
 
 // A hard cap on how many <img> tags a single push will sideload into the media
@@ -51,6 +51,19 @@ define( 'AIOS_PUBLISHER_MAX_TREE_IMAGES', 60 );
 // a real design system measured in production is 93,622 bytes, so the old cap
 // truncated it mid-rule and shipped a broken block with no error.
 define( 'AIOS_PUBLISHER_MAX_DESIGN_CSS', 200000 );
+// Ceiling for ONE image pushed by value to /media, in bytes of decoded data.
+//
+// WHY A PUSH ROUTE EXISTS AT ALL. Every other image path here SIDELOADS: the platform
+// sends a URL and this site fetches it. That requires the platform's image host to be
+// reachable from this server, which it is in production and is NOT from a laptop, a
+// private network, or any deployment behind a VPN - and the failure is silent, because
+// media_sideload_image() failing is treated as best-effort and the <img> simply keeps a
+// URL this site cannot load. The result is a published page whose pictures are broken
+// for every visitor. Pushing the bytes removes the reachability requirement entirely.
+//
+// 12 MB is generous for a generated page image (a 1536x1024 PNG measures well under 2 MB)
+// and still far below what an unbounded base64 body could do to memory.
+define( 'AIOS_PUBLISHER_MAX_MEDIA_BYTES', 12582912 );
 
 // wp_options keys. The API key lives in its own option so a "regenerate" is a
 // focused write; the operator-tunable defaults live in one options array.
@@ -68,6 +81,17 @@ define( 'AIOS_PUBLISHER_META_CTA', '_aios_cta' );
 // The analyzed-site (or template) design CSS, enqueued in <head> on a managed post so the
 // flat-HTML body matches the design on ANY theme (a plain default theme, no Elementor).
 define( 'AIOS_PUBLISHER_META_DESIGN_CSS', '_aios_design_css' );
+// The typeface NAMES that design CSS asks for. Stored separately from the CSS because
+// they are loaded, not applied: the stylesheet names a family and the site still has to
+// fetch it, or the page renders in the theme's font with the client's own named in every
+// rule - which looks like a layout bug and is a missing webfont.
+define( 'AIOS_PUBLISHER_META_DESIGN_FONTS', '_aios_design_fonts' );
+// Whether this post is a COMPLETE design page (hero, sections, FAQ, CTA, all styled by
+// the pushed design CSS) rather than a long-form article for the plugin to decorate.
+// Set, the article furniture is skipped - see aios_publisher_is_self_contained(): running
+// both renderers gives the page a byline above its own hero, a generated contents list,
+// and a SECOND FAQ and call-to-action under the ones it already had.
+define( 'AIOS_PUBLISHER_META_SELF_CONTAINED', '_aios_self_contained' );
 // Whether this is a FULL-WIDTH landing page (breaks out of the theme's narrow content
 // column) rather than a narrow long-form article. Set by the push for non-article pages.
 define( 'AIOS_PUBLISHER_META_FULL_WIDTH', '_aios_full_width' );

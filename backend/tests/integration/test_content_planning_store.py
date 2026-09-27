@@ -311,3 +311,72 @@ def test_assets_without_a_hash_are_not_deduped_against_each_other(store: Any) ->
     a = store.record_brand_asset(kit_id=kit_id, kind="photo", source_url="https://x.test/a.jpg")
     b = store.record_brand_asset(kit_id=kit_id, kind="photo", source_url="https://x.test/b.jpg")
     assert a is not None and b is not None and a != b
+
+
+# --------------------------------------------------------------------------- #
+# Per-page-type blueprints (0154) - the MERGE-FORWARD write.
+#
+# A capture measures ONE page, so it can only be evidence about that page's type.
+# Carrying the previous version's map forward and overlaying this capture's type is
+# what lets an operator capture the homepage, then the services page, and end with a
+# kit that knows the real structure of both - instead of each capture discarding what
+# the last one learned.
+# --------------------------------------------------------------------------- #
+def test_a_capture_records_the_page_type_it_measured(store: Any) -> None:
+    client_id = _client_id(store)
+    _kit(store, client_id, source_page_type="homepage",
+         blueprint=[{"kind": "hero"}, {"kind": "stats"}])
+    active = store.active_brand_kit(client_id)
+    assert active["source_page_type"] == "homepage"
+    assert [s["kind"] for s in active["blueprints"]["homepage"]] == ["hero", "stats"]
+
+
+def test_a_second_capture_of_a_different_type_keeps_the_first(store: Any) -> None:
+    """THE reason the map exists. Without the merge, capturing the services page would
+    discard everything the homepage capture established."""
+    client_id = _client_id(store)
+    _kit(store, client_id, source_page_type="homepage",
+         blueprint=[{"kind": "hero"}, {"kind": "stats"}])
+    _kit(store, client_id, source_page_type="service",
+         blueprint=[{"kind": "hero"}, {"kind": "pricing"}, {"kind": "cta"}])
+
+    active = store.active_brand_kit(client_id)
+    assert active["version"] == 2
+    assert set(active["blueprints"]) == {"homepage", "service"}
+    assert [s["kind"] for s in active["blueprints"]["homepage"]] == ["hero", "stats"]
+    assert [s["kind"] for s in active["blueprints"]["service"]] == ["hero", "pricing", "cta"]
+
+
+def test_recapturing_the_same_type_replaces_that_type_only(store: Any) -> None:
+    """The newer measurement of a type wins for that type, and touches nothing else."""
+    client_id = _client_id(store)
+    _kit(store, client_id, source_page_type="homepage", blueprint=[{"kind": "hero"}])
+    _kit(store, client_id, source_page_type="service", blueprint=[{"kind": "hero"}])
+    _kit(store, client_id, source_page_type="service",
+         blueprint=[{"kind": "hero"}, {"kind": "process"}, {"kind": "cta"}])
+
+    active = store.active_brand_kit(client_id)
+    assert active["version"] == 3
+    assert [s["kind"] for s in active["blueprints"]["service"]] == ["hero", "process", "cta"]
+    assert [s["kind"] for s in active["blueprints"]["homepage"]] == ["hero"]
+
+
+def test_a_capture_with_no_page_type_adds_no_map_entry(store: Any) -> None:
+    """'' is the safe answer: the sequence is stored as the singular blueprint - still
+    measured, still reviewable - but never applied to a page type nobody recorded."""
+    client_id = _client_id(store)
+    _kit(store, client_id, source_page_type="", blueprint=[{"kind": "hero"}])
+    active = store.active_brand_kit(client_id)
+    assert active["blueprints"] == {}
+    assert active["source_page_type"] == ""
+    assert [s["kind"] for s in active["blueprint"]] == ["hero"]
+
+
+def test_the_page_type_key_is_normalised_on_the_way_in(store: Any) -> None:
+    """The wizard, the URL classifier and a job row have never agreed on case or on
+    hyphen-vs-underscore, so the key is normalised once, here, at the write."""
+    client_id = _client_id(store)
+    _kit(store, client_id, source_page_type="Service-Area", blueprint=[{"kind": "hero"}])
+    active = store.active_brand_kit(client_id)
+    assert set(active["blueprints"]) == {"service_area"}
+    assert active["source_page_type"] == "service_area"

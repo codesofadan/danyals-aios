@@ -233,3 +233,78 @@ def test_template_values_load_as_settings(monkeypatch: pytest.MonkeyPatch) -> No
     for key, value in _template_assignments().items():
         monkeypatch.setenv(key, value)
     Settings()
+
+
+class TestTheTemplateDoesNotSilentlyOverrideTheCodeDefault:
+    """The one value this file is allowed to have an opinion about.
+
+    This gate's own docstring lists "whether a shipped VALUE is right" as something it
+    cannot catch, and names IMAGE_GEN_MODEL as the example. That is not hypothetical:
+    the key has gone stale TWICE. It read `gpt-image-1` while the code had moved to
+    `gpt-image-2`, and `gpt-image-2` while the code had moved to `gpt-image-2.5-flare`.
+    Both times production generated against a superseded model and said nothing, because
+    an EnvironmentFile value beats a code default and neither side is wrong on its own.
+
+    So for the handful of keys where the template pins a value the code ALSO defaults,
+    the two are asserted equal. A model change in config.py now fails the build until
+    the template moves with it, which is the only place the drift is visible.
+    """
+
+    #: Keys the template pins that Settings also defaults. Drift here is silent in prod.
+    PINNED = ("IMAGE_GEN_MODEL", "IMAGE_GEN_QUALITY", "IMAGE_GEN_FORMAT", "IMAGE_GEN_SIZE")
+
+    @pytest.mark.parametrize("key", PINNED)
+    def test_the_pinned_value_equals_the_code_default(self, key: str) -> None:
+        from app.config import Settings
+
+        template = dict(
+            line.split("=", 1)
+            for line in _TEMPLATE.read_text(encoding="utf-8").splitlines()
+            if "=" in line and not line.lstrip().startswith("#")
+        )
+        assert key in template, f"{key} vanished from the template"
+        assert str(getattr(Settings(), key.lower())) == template[key].strip(), (
+            f"{key} is {template[key].strip()!r} in the deploy template but "
+            f"{getattr(Settings(), key.lower())!r} in config.py. The template wins on "
+            f"every deploy, so production would use the template's value."
+        )
+
+
+class TestTheComposeFallbackDoesNotSilentlyOverrideTheCodeDefault:
+    """The same drift, in the file that actually governs the Portainer deploy.
+
+    ``docker-compose.yml`` writes its environment as ``${VAR:-literal}``. That literal
+    is not documentation - it is what the container receives whenever the stack env
+    does not set the key, so ``app/config.py`` never gets a vote. It had gone TWO
+    generations stale (``gpt-image-1`` while the code ran ``gpt-image-2`` and then
+    ``gpt-image-2.5-flare``), and OpenAI retires gpt-image-1 on 2026-10-23 - so the
+    fallback was not merely superseded, it was months from failing outright.
+
+    The systemd template gets the same treatment one class up. Both files ship a value;
+    both therefore have to move when the code default moves.
+    """
+
+    COMPOSE = Path(__file__).resolve().parents[2] / "docker-compose.yml"
+    PINNED = ("IMAGE_GEN_MODEL", "IMAGE_GEN_QUALITY", "IMAGE_GEN_FORMAT")
+
+    def _fallbacks(self) -> dict[str, str]:
+        text = self.COMPOSE.read_text(encoding="utf-8")
+        return dict(re.findall(r"^\s*([A-Z0-9_]+):\s*\$\{\1:-([^}]*)\}\s*$", text, re.M))
+
+    @pytest.mark.parametrize("key", PINNED)
+    def test_the_compose_fallback_equals_the_code_default(self, key: str) -> None:
+        from app.config import Settings
+
+        found = self._fallbacks()
+        assert key in found, f"{key} has no ${{{key}:-...}} fallback in docker-compose.yml"
+        assert str(getattr(Settings(), key.lower())) == found[key], (
+            f"docker-compose.yml falls back to {found[key]!r} for {key}, but config.py "
+            f"defaults to {getattr(Settings(), key.lower())!r}. The compose literal wins "
+            f"in every container the stack env does not explicitly set."
+        )
+
+    def test_the_parser_actually_found_something(self) -> None:
+        """A regex that silently matches nothing would make every assertion above
+        vacuous - the exact failure mode this whole file exists to prevent."""
+        assert len(self._fallbacks()) > 20
+

@@ -53,7 +53,13 @@ EM_DASH = "—"
 
 MIN_SECTION_WORDS = 40
 META_TITLE_MIN, META_TITLE_MAX = 50, 60
-META_DESC_MIN, META_DESC_MAX = 150, 160
+# 155, NOT 160. Google's own truncation is pixel-based and roughly 160 characters, which
+# is where this number came from - but the number an operator actually SEES is Yoast's,
+# and Yoast turns the description bar ORANGE above 156. A page that is correct by Google's
+# measure and amber in the editor reads to a client as a page we got wrong, every time
+# they open it. The floor drops to 120 (Yoast's own green threshold) so the writer has a
+# usable range instead of a five-character window it has to keep retrying to hit.
+META_DESC_MIN, META_DESC_MAX = 120, 155
 
 _HEADING_RE = re.compile(r"^(#{1,6})\s+(.*\S)\s*$")
 _WORD_RE = re.compile(r"[A-Za-z0-9']+")

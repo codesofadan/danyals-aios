@@ -40,46 +40,53 @@ export default function Modal({ open, title, onClose, children, footer, wide }: 
   if (!open) return null;
 
   return (
-    <div className="modal-scrim" onClick={onClose}>
-      <div
-        ref={panelRef}
-        className={wide ? "modal wide" : "modal"}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-        tabIndex={-1}
-        style={{ outline: "none" }}
-        onClick={(e) => e.stopPropagation()}
-      >
+    // Self-wrapped in `.tw`: the overlay styles are scoped `.tw .modal-scrim` in
+    // globals.css and THE ADMIN LAYOUT PROVIDES NO `.tw`. Without it the dialog
+    // renders inline at the bottom of the page instead of over it — the operator
+    // clicks a button in a table and the page jumps to a confirmation a screen and
+    // a half below. Every working modal here self-wraps; see CitationCampaignModal.
+    <div className="tw">
+      <div className="modal-scrim" onClick={onClose}>
         <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            gap: "var(--s-6)",
-            padding: "var(--s-7) var(--s-7) 0",
-          }}
+          ref={panelRef}
+          className={wide ? "modal wide" : "modal"}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby={titleId}
+          tabIndex={-1}
+          style={{ outline: "none" }}
+          onClick={(e) => e.stopPropagation()}
         >
-          <h2 id={titleId} style={{ margin: 0, fontSize: "var(--fs-lg)", fontWeight: 800 }}>
-            {title}
-          </h2>
-          <button type="button" className="iconbtn" aria-label="Close" onClick={onClose}>
-            <span className="material-symbols-rounded" aria-hidden="true">close</span>
-          </button>
-        </div>
-        <div style={{ padding: "var(--s-6) var(--s-7)" }}>{children}</div>
-        {footer ? (
           <div
             style={{
               display: "flex",
-              justifyContent: "flex-end",
-              gap: "var(--s-4)",
-              padding: "0 var(--s-7) var(--s-7)",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: "var(--s-6)",
+              padding: "var(--s-7) var(--s-7) 0",
             }}
           >
-            {footer}
+            <h2 id={titleId} style={{ margin: 0, fontSize: "var(--fs-lg)", fontWeight: 800 }}>
+              {title}
+            </h2>
+            <button type="button" className="iconbtn" aria-label="Close" onClick={onClose}>
+              <span className="material-symbols-rounded" aria-hidden="true">close</span>
+            </button>
           </div>
-        ) : null}
+          <div style={{ padding: "var(--s-6) var(--s-7)" }}>{children}</div>
+          {footer ? (
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "flex-end",
+                gap: "var(--s-4)",
+                padding: "0 var(--s-7) var(--s-7)",
+              }}
+            >
+              {footer}
+            </div>
+          ) : null}
+        </div>
       </div>
     </div>
   );

@@ -9,6 +9,7 @@ import {
   fetchPublicPageReportHtml,
   publicPageReportPdfUrl,
   usePublicPage,
+  type PublicFinding,
 } from "@/lib/hooks/publicAudit";
 
 // The shareable public audit report behind /leads/<slug>.
@@ -24,6 +25,15 @@ import {
 // funnel's `fa-card`. That card is 460px wide because it holds an email + URL
 // form; reusing it here clamped a 13-table consulting report into a narrow strip
 // pinned to the left of the screen. This is a full-width, fluid reading layout.
+
+// Severity in a business owner's words. The engine's own vocabulary ("major") reads as a
+// grade rather than a consequence, and this page is read by somebody deciding whether to
+// spend money on it.
+const SEV_LABEL: Record<string, string> = {
+  critical: "Critical",
+  major: "Important",
+  minor: "Minor",
+};
 
 function formatWhen(when: string | null): string {
   if (!when) return "";
@@ -79,6 +89,8 @@ export default function PublicAuditPage({ slug }: { slug: string }) {
   const domain = cleanDomain(page.url);
   const verdict = page.score != null ? VERDICT[scoreBand(page.score)] : null;
   const when = formatWhen(page.when);
+  const findings = page.top_findings ?? [];
+  const notChecked = page.not_checked ?? [];
 
   return (
     <Shell>
@@ -108,6 +120,60 @@ export default function PublicAuditPage({ slug }: { slug: string }) {
           </div>
         )}
       </header>
+
+      {/* WHAT WE FOUND, before the report. The page used to be a score and an embedded
+          document: a reader who did not open the report learned nothing they could act on,
+          and this is the page that gets forwarded to the person who decides. */}
+      {findings.length > 0 && (
+        <section className="pa-block">
+          <h2 className="pa-h2">What we found</h2>
+          <p className="pa-sub">
+            The {findings.length === 1 ? "issue" : `${findings.length} issues`} costing this
+            site the most, worst first. The full list is in the report below.
+          </p>
+          <ul className="pa-finds">
+            {findings.map((f: PublicFinding) => (
+              <li key={f.title} className={`pa-find pa-find--${f.severity}`}>
+                <span className="pa-find-sev">{SEV_LABEL[f.severity] ?? f.severity}</span>
+                <span className="pa-find-t">{f.title}</span>
+                {f.pages > 0 && (
+                  <span className="pa-find-n">
+                    {f.pages.toLocaleString()} {f.pages === 1 ? "page" : "pages"}
+                  </span>
+                )}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {/* WHAT THIS DID NOT CHECK. The honest half, and the one a free audit cannot leave
+          out: silence on off-page or local reads exactly like a clean bill of health, and
+          a prospect who believes their backlink profile was reviewed has been misled by
+          omission. It is also, truthfully, the reason to buy the full audit. */}
+      {notChecked.length > 0 && (
+        <section className="pa-block pa-gaps">
+          <h2 className="pa-h2">
+            What this {page.kind === "paid" ? "audit" : "free audit"} did not check
+          </h2>
+          <p className="pa-sub">
+            These were not measured, which is not the same as clean - nothing above or below
+            says anything about them either way.
+          </p>
+          <ul className="pa-gap-list">
+            {notChecked.map((line) => (
+              <li key={line}>{line}</li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {page.crawl_note ? (
+        <section className="pa-block pa-gaps">
+          <h2 className="pa-h2">About the score</h2>
+          <p className="pa-sub" style={{ marginBottom: 0 }}>{page.crawl_note}</p>
+        </section>
+      ) : null}
 
       {page.has_report ? (
         <div className="pa-block pa-block--flush pa-viewer">

@@ -93,13 +93,25 @@ def _dynamic_update(table: str, row_id: str, fields: dict[str, Any]) -> None:
         cur.execute(stmt, [*params, row_id])
 
 
-class AuditStore(Protocol):
-    """The DB/cost seam the task needs (backed by the privileged connection)."""
+class AuditRowStore(Protocol):
+    """The row + cost seam BOTH audit paths need (the privileged connection).
+
+    Split from :class:`AuditStore` so the PUBLIC funnel is not asked for a tenant it
+    does not have: a public lead row carries no ``client_id``, so a client business
+    profile is not merely unavailable there, it is meaningless.
+    """
 
     def load(self, audit_id: str) -> dict[str, Any] | None: ...
     def update(self, audit_id: str, fields: dict[str, Any]) -> None: ...
     def evaluate(self, row: dict[str, Any], cost: float) -> GateDecision: ...
     def record_cost(self, row: dict[str, Any], cost: float) -> None: ...
+
+
+class AuditStore(AuditRowStore, Protocol):
+    """The seam the AUTHENTICATED audit needs: a row store that can also resolve the
+    client's canonical NAP, so the local pipeline identifies the right business."""
+
+    def business_profile(self, client_id: str) -> dict[str, Any] | None: ...
 
 
 class _Runner(Protocol):
@@ -113,6 +125,7 @@ class _Runner(Protocol):
         depth: str | None = None,
         max_pages: int | None = None,
         business_name: str | None = None,
+        city: str | None = None,
         is_local_business: bool = False,
     ) -> AuditRunResult: ...
 
@@ -131,6 +144,22 @@ class SupabaseAuditStore:
 
     def update(self, audit_id: str, fields: dict[str, Any]) -> None:
         _dynamic_update("audits", audit_id, fields)
+
+    def business_profile(self, client_id: str) -> dict[str, Any] | None:
+        """The client's CANONICAL NAP row (``client_business_profiles``), or None.
+
+        This is the same record the citations module submits to directories, which is
+        exactly why the audit should identify the GBP by it: if the audit and the
+        citation builder disagree about the business's name, they are auditing and
+        building two different businesses.
+        """
+        with privileged_connection() as cur:
+            cur.execute(
+                "select business_name, city, region, postal_code, phone "
+                "from public.client_business_profiles where client_id = %s limit 1",
+                (client_id,),
+            )
+            return cur.fetchone()
 
     def evaluate(self, row: dict[str, Any], cost: float) -> GateDecision:
         """Pre-flight the paid audit spend through the SAME cost gate as every
@@ -181,10 +210,25 @@ def _config_from_settings(settings: Settings) -> AuditEngineConfig:
         timeout_seconds=settings.audit_timeout_seconds,
         max_pages=settings.audit_max_pages,
         profile=settings.audit_profile,
+        # The engine's whole off-page dimension is 39 checks reading one DataForSEO
+        # backlink profile. It reads the credential from its environment, and the
+        # platform's `.env` is not in the engine's environment, so it has to be
+        # handed over explicitly.
+        dataforseo_login=settings.dataforseo_login or "",
+        dataforseo_password=(
+            settings.dataforseo_password.get_secret_value()
+            if settings.dataforseo_password
+            else ""
+        ),
+        # Same reason as the credential above: the engine reads these from its
+        # environment, and this deployment's choice of model tier only reaches it if the
+        # adapter hands it over. Its narrative default is an Opus tier.
+        agent_model=settings.audit_agent_model,
+        narrative_model=settings.audit_narrative_model or settings.audit_agent_model,
     )
 
 
-def _safe_record_cost(store: AuditStore, row: dict[str, Any], cost: float) -> None:
+def _safe_record_cost(store: AuditRowStore, row: dict[str, Any], cost: float) -> None:
     """Log the run cost; a logging hiccup must never fail the completed job."""
     try:
         store.record_cost(row, cost)
@@ -344,6 +388,10 @@ def _ingest_altitudes(
             run_uuid=str(result.run_uuid or ""),
             tier=tier_label.lower(),
             types=list(row.get("types") or []),
+            # The page budget this run was CREATED with (0084 snapshots it on the row).
+            # "3 pages" only means something against what we set out to crawl: 3 of 3 is a
+            # complete audit, 3 of 300 is a blocked one.
+            planned_pages=int(row.get("max_pages") or 0),
         )
         logger.info(
             "audit_altitudes_ingested",
@@ -352,7 +400,12 @@ def _ingest_altitudes(
             findings=ingested.findings,
             instances=ingested.instances,
             truncated=ingested.truncated,
+            crawl=ingested.crawl_verdict or "unassessed",
         )
+        # Kept as locals for the report build below: the banner must say exactly what the
+        # stored verdict says, and reading it from the ingest result is the only way the
+        # two cannot drift.
+        ingest_verdict, ingest_note = ingested.crawl_verdict, ingested.crawl_note
     except Exception as exc:
         logger.warning(
             "audit_altitude_ingest_failed",
@@ -400,6 +453,13 @@ def _ingest_altitudes(
                 "client_name": str(row.get("client_name") or ""),
                 "tier": tier_label,
                 "generated_at": _utcnow().strftime("%d %B %Y"),
+                # Whether we actually reached the site (0160). The report opens with this
+                # when it is not clean, ahead of the summary: a caveat printed after the
+                # findings is a caveat nobody reads, and this one changes what every
+                # number in the document means. Taken from the ingest that just ran, so
+                # the banner cannot disagree with the stored verdict.
+                "crawl_verdict": ingest_verdict,
+                "crawl_note": ingest_note,
             },
         )
         logger.info(
@@ -420,6 +480,50 @@ def _ingest_altitudes(
         # ingest failure because the remedy is different and cheaper.
         return f"building the workbook failed: {type(exc).__name__}: {exc}"
     return ""
+
+
+def resolve_local_identity(store: AuditRowStore, row: dict[str, Any]) -> tuple[str, str]:
+    """The ``(business_name, city)`` the engine should identify this client's GBP by.
+
+    WHY THIS IS NOT ``row["client_name"]``. The audits row carries the CRM display
+    name - "Acme (retainer)", "Smith - Dental", whatever the operator typed into the
+    client list. The platform separately holds the client's canonical NAP in
+    ``client_business_profiles``: the real registered business name, its city, the
+    phone. That profile is what the citations module submits to directories, so it is
+    also the name Google's own listing is most likely filed under.
+
+    The audit used to send the display name and NO city at all, on the reasoning that
+    "the engine's domain check is what actually proves identity". The domain check is
+    a VERIFIER, not a finder - it can only confirm or deny whichever candidate the
+    text search returned, and a bad query returns five wrong candidates for it to
+    reject. A city narrows the search to the right market, which is the difference
+    between "Smith Dental" matching a practice two states away and matching the one
+    on the invoice.
+
+    Falls back cleanly at every step: no client, no profile, or a profile with a
+    blank name all end at the display name, which is exactly today's behaviour. Never
+    raises - a lookup failure must not fail an audit that has nothing to do with
+    local SEO.
+    """
+    display_name = str(row.get("client_name") or "").strip()
+    client_id = str(row.get("client_id") or "").strip()
+    if not client_id:
+        return display_name, ""
+    # `AuditStore` is a Protocol, so nothing structurally FORCES a store to carry
+    # this method - and a missing one must degrade to the display name rather than
+    # raise an AttributeError from inside a Celery task. Asked explicitly so the
+    # fallback is a decision in the code and not an exception swallowed below.
+    lookup = getattr(store, "business_profile", None)
+    if not callable(lookup):
+        return display_name, ""
+    try:
+        profile = lookup(client_id) or {}
+    except Exception:
+        logger.warning("audit_business_profile_lookup_failed", client_id=client_id)
+        return display_name, ""
+    name = str(profile.get("business_name") or "").strip() or display_name
+    city = str(profile.get("city") or "").strip()
+    return name, city
 
 
 def execute_audit(
@@ -468,6 +572,11 @@ def execute_audit(
 
     store.update(audit_id, {"status": "running", "started_at": _utcnow().isoformat()})
 
+    # Resolved BEFORE the run, from the client's canonical NAP rather than the CRM
+    # display name, so the local pipeline searches Google Places for the business
+    # the citations module is actually building listings for.
+    business_name, city = resolve_local_identity(store, row)
+
     try:
         # The authenticated dashboard audit runs the consulting pipeline over EVERY
         # dimension; ``depth`` decides how much paid corroboration it buys (see
@@ -487,9 +596,10 @@ def execute_audit(
             # ran at, so a queued-before-deploy job is unaffected.
             max_pages=row.get("max_pages"),
             # Identify the business to Google Places by what we KNOW, not by
-            # whatever the homepage <title> happens to say. The audit row carries
-            # no city; the engine's domain check is what actually proves identity.
-            business_name=row.get("client_name"),
+            # whatever the homepage <title> happens to say - and by the CANONICAL
+            # NAP rather than the CRM display name. See resolve_local_identity.
+            business_name=business_name or None,
+            city=city or None,
             # Local checks run for a client who IS a local business, stated
             # on the client record - never inferred from depth (0147).
             is_local_business=bool(row.get("is_local_business", False)),
@@ -720,7 +830,7 @@ class PublicAuditStore:
 
 
 def execute_public_audit(
-    store: AuditStore,
+    store: AuditRowStore,
     settings: Settings,
     public_audit_id: str,
     *,

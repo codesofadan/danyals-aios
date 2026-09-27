@@ -20,6 +20,17 @@ dependencies = [
     "tenacity>=8.5",
     "typer>=0.12",
     "jinja2>=3.1",
+    # NOT optional, despite `config.py` importing it in a try/except. It is how the
+    # engine reads its OWN `.env`, and therefore how it gets EVERY API key.
+    #
+    # It was never declared, so it was absent from this venv - and the swallowed
+    # ImportError meant nothing said so. `get_keys()` returned all-None, `--mode paid`
+    # silently disabled `--serper/--psi/--places`, and the run recorded
+    # `permitted_cost_classes: ['zero']`. Every billable check was then correctly
+    # reported `source_not_permitted` - which is 71 of 71 off-page checks and 33 of 36
+    # local ones, because those two dimensions are entirely billable. Both read
+    # "Not measured" on every audit the platform has ever produced.
+    "python-dotenv>=1.0",
     # Report page-cap safety net: bundle.py truncates report.pdf to the tier
     # ceiling (<=100 paid / <=20 free) if it ever renders past it. Pure-wheel,
     # no system libraries. The absence of it is handled gracefully (the net

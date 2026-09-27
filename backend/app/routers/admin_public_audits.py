@@ -1,9 +1,15 @@
-"""Admin view of the PUBLIC free-audit leads (the landing-page funnel inbox).
+"""Admin view of the PUBLIC free-audit leads (the retired landing-page funnel's inbox).
 
-The unauthenticated funnel in :mod:`app.routers.public` captures one free audit
-per email into ``public.public_audits``. Those rows are LEADS - an email + a
-target URL + the audit outcome - and were previously write-only (no staff could
-see them). This router is the staff-facing read surface over that same table.
+THE FUNNEL IS GONE. ``POST /public/audits`` - the unauthenticated route that captured one
+free audit per email into ``public.public_audits`` - was deleted on 2026-09-18 when the
+owner retired the self-serve funnel, and the operator's 2026-09-26 decision is that it
+stays retired: an operator runs the audit and shares the link. So NO NEW ROWS ARRIVE in
+this table. What is here is the historical lead list, and it is still worth reading: the
+links those leads hold were sent to real people and still resolve.
+
+Those rows are LEADS - an email + a target URL + the audit outcome - and were previously
+write-only (no staff could see them). This router is the staff-facing read surface over
+that same table.
 
 Security posture:
 

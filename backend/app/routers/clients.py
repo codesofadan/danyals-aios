@@ -7,9 +7,9 @@ from __future__ import annotations
 import asyncio
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 
-from app.core.auth import CurrentUser, require_perm, require_staff
+from app.core.auth import CurrentUser, require_owner, require_perm, require_staff
 from app.core.deps import RedisDep, SettingsDep
 from app.core.pagination import PageDep
 from app.db.clients_repo import ClientsRepo, ClientsRepoDep
@@ -37,6 +37,7 @@ from app.schemas.identity import (
     PortalUserRequest,
     SetPasswordRequest,
 )
+from app.services import client_offboarding
 from app.services.activity import record_activity
 from app.services.credentials import generate_password
 from app.services.login_credentials import reveal_password, set_password
@@ -48,6 +49,10 @@ router = APIRouter(tags=["clients"])
 logger = get_logger("app.clients")
 
 ManageClients = Annotated[CurrentUser, Depends(require_perm("manage_clients"))]
+# Offboarding destroys a client's audits, their generated pages and every shared link. It is
+# the most destructive action in the product, so it takes the narrowest door there is -
+# narrower than `manage_clients`, which every lead holds.
+OwnerOnly = Annotated[CurrentUser, Depends(require_owner())]
 # The five client READS below carried CurrentUserDep alone. The outcome was already
 # correct - `clients_select` is `using (is_staff())`, so a portal client got zero rows
 # or a 404 - but the app tier granted nothing of its own, leaving one RLS policy as the
@@ -238,6 +243,86 @@ async def delete_client(client_id: str, repo: ClientsRepoDep, actor: ManageClien
         actor, kind="client", action="deleted client", target=client_id,
         entity_type="client", entity_id=client_id,
     )
+
+
+# --------------------------------------------------------------------------- #
+# Offboarding: leaving a client means leaving completely (E1).
+# --------------------------------------------------------------------------- #
+@router.get("/clients/{client_id}/offboard-preview")
+async def preview_client_offboarding(
+    client_id: str, repo: ClientsRepoDep, _user: OwnerOnly
+) -> dict[str, Any]:
+    """What offboarding this client WOULD destroy. Touches nothing.
+
+    WHY A SEPARATE READ. A destructive action an operator cannot inspect first is one they
+    will avoid using - and then the client's data stays anyway, which is the outcome this
+    whole feature exists to prevent. This is what the confirmation dialog renders, so the
+    numbers approved are the numbers the purge acts on rather than a sentence written
+    beside them.
+
+    It also names what will NOT be removed (the cost ledger, the activity log, images
+    shared with another client's pages, and anything already published on the client's own
+    website), because "delete everything" must not be read as a promise the platform does
+    not keep.
+    """
+    if await asyncio.to_thread(repo.get_client, client_id) is None:
+        raise _CLIENT_NOT_FOUND
+    plan = await asyncio.to_thread(client_offboarding.preview, client_id)
+    return plan.as_dict()
+
+
+@router.post("/clients/{client_id}/offboard")
+async def offboard_client(
+    client_id: str,
+    repo: ClientsRepoDep,
+    settings: SettingsDep,
+    actor: OwnerOnly,
+    confirm: Annotated[bool, Query()] = False,
+) -> dict[str, Any]:
+    """Withdraw every shared link, delete the artifacts and the rows, remove the client.
+
+    OWNER-ONLY and gated on an explicit ``confirm``. Deleting a client used to leave their
+    audits behind (the link is ``on delete set null``, deliberately, so the job ledger
+    survives) - which meant their generated pages stayed on disk and any PUBLIC report they
+    had published stayed openable by anyone holding the URL. There was no answer to "remove
+    my data" beyond deleting one row.
+
+    The links are withdrawn FIRST, so if anything later fails the one consequence visible to
+    the outside world is already undone. What was actually destroyed is returned, counted -
+    not a bare ``{"ok": true}``, because the operator has just been asked to approve
+    specific numbers and is entitled to see the ones that happened.
+    """
+    client = await asyncio.to_thread(repo.get_client, client_id)
+    if client is None:
+        raise _CLIENT_NOT_FOUND
+    if not confirm:
+        plan = await asyncio.to_thread(client_offboarding.preview, client_id)
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"This permanently removes {plan.audits} audit(s), {plan.content_jobs} "
+                f"content job(s) and withdraws {plan.published_pages} shared link(s) for "
+                f"{plan.client_name or 'this client'}. Resend with confirm=true to proceed."
+            ),
+        )
+    result = await asyncio.to_thread(
+        client_offboarding.purge,
+        client_id,
+        artifact_root=settings.audit_artifact_dir,
+    )
+    # Recorded BEFORE returning and against the client id, which is about to stop resolving:
+    # the activity log is the only place this act survives, so it has to carry the counts.
+    await record_activity(
+        actor, kind="client",
+        action=(
+            f"offboarded a client - withdrew {result.pages_withdrawn} shared link(s), "
+            f"deleted {result.audits_deleted} audit(s) and "
+            f"{result.content_jobs_deleted} content job(s)"
+        ),
+        target=result.client_name or client_id,
+        meta="; ".join(result.notes) or None,
+    )
+    return result.as_dict()
 
 
 @router.get(

@@ -88,84 +88,91 @@ export default function ConfirmDialog({
   const armed = !typeToConfirm || typed.trim() === typeToConfirm;
 
   return (
-    <div className="modal-scrim" onClick={onCancel}>
-      <div
-        ref={panelRef}
-        className="modal"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-        aria-describedby={bodyId}
-        tabIndex={-1}
-        style={{ maxWidth: 460, outline: "none" }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div style={{ display: "flex", gap: 12, padding: "18px 18px 0" }}>
-          <span
-            className="material-symbols-rounded"
-            aria-hidden="true"
-            style={{
-              fontSize: 26,
-              color: tone === "danger" ? "var(--crit)" : "var(--warn)",
-            }}
-          >
-            {TONE_ICON[tone]}
-          </span>
-          <div>
-            <h2 id={titleId} style={{ margin: 0, fontSize: 15.5, fontWeight: 800 }}>
-              {title}
-            </h2>
-            <div
-              id={bodyId}
+    // Self-wrapped in `.tw`: the overlay styles are scoped `.tw .modal-scrim` in
+    // globals.css and THE ADMIN LAYOUT PROVIDES NO `.tw`. Without it the dialog
+    // renders inline at the bottom of the page instead of over it — the operator
+    // clicks a button in a table and the page jumps to a confirmation a screen and
+    // a half below. Every working modal here self-wraps; see CitationCampaignModal.
+    <div className="tw">
+      <div className="modal-scrim" onClick={onCancel}>
+        <div
+          ref={panelRef}
+          className="modal"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby={titleId}
+          aria-describedby={bodyId}
+          tabIndex={-1}
+          style={{ maxWidth: 460, outline: "none" }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div style={{ display: "flex", gap: 12, padding: "18px 18px 0" }}>
+            <span
+              className="material-symbols-rounded"
+              aria-hidden="true"
               style={{
-                marginTop: 6,
-                fontSize: 12.8,
-                lineHeight: 1.6,
-                color: "var(--body)",
+                fontSize: 26,
+                color: tone === "danger" ? "var(--crit)" : "var(--warn)",
               }}
             >
-              {body}
-              {reassurance ? (
-                <div style={{ marginTop: 8, color: "var(--muted)" }}>{reassurance}</div>
-              ) : null}
+              {TONE_ICON[tone]}
+            </span>
+            <div>
+              <h2 id={titleId} style={{ margin: 0, fontSize: 15.5, fontWeight: 800 }}>
+                {title}
+              </h2>
+              <div
+                id={bodyId}
+                style={{
+                  marginTop: 6,
+                  fontSize: 12.8,
+                  lineHeight: 1.6,
+                  color: "var(--body)",
+                }}
+              >
+                {body}
+                {reassurance ? (
+                  <div style={{ marginTop: 8, color: "var(--muted)" }}>{reassurance}</div>
+                ) : null}
+              </div>
             </div>
           </div>
-        </div>
 
-        {typeToConfirm ? (
-          <div className="fld" style={{ padding: "14px 18px 0" }}>
-            <label htmlFor={`${titleId}-ack`}>
-              Type <b>{typeToConfirm}</b> to confirm
-            </label>
-            <input
-              id={`${titleId}-ack`}
-              value={typed}
-              onChange={(e) => setTyped(e.target.value)}
-              autoComplete="off"
-              placeholder={typeToConfirm}
-            />
-          </div>
-        ) : null}
+          {typeToConfirm ? (
+            <div className="fld" style={{ padding: "14px 18px 0" }}>
+              <label htmlFor={`${titleId}-ack`}>
+                Type <b>{typeToConfirm}</b> to confirm
+              </label>
+              <input
+                id={`${titleId}-ack`}
+                value={typed}
+                onChange={(e) => setTyped(e.target.value)}
+                autoComplete="off"
+                placeholder={typeToConfirm}
+              />
+            </div>
+          ) : null}
 
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "flex-end",
-            gap: 8,
-            padding: 18,
-          }}
-        >
-          <button type="button" className="ghostbtn" onClick={onCancel} disabled={pending}>
-            {cancelLabel}
-          </button>
-          <button
-            type="button"
-            className={tone === "danger" ? "danger-btn" : "primary-btn"}
-            onClick={onConfirm}
-            disabled={pending || !armed}
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "flex-end",
+              gap: 8,
+              padding: 18,
+            }}
           >
-            {pending ? "Working…" : confirmLabel}
-          </button>
+            <button type="button" className="ghostbtn" onClick={onCancel} disabled={pending}>
+              {cancelLabel}
+            </button>
+            <button
+              type="button"
+              className={tone === "danger" ? "danger-btn" : "primary-btn"}
+              onClick={onConfirm}
+              disabled={pending || !armed}
+            >
+              {pending ? "Working…" : confirmLabel}
+            </button>
+          </div>
         </div>
       </div>
     </div>

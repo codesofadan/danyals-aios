@@ -45,8 +45,13 @@ export const ADMIN_NAV: NavGroup[] = [
     // is its own destination again. Do not re-fold them.
     title: "SEO Engine",
     items: [
-      { icon: "fact_check", label: "Audit", href: "/admin/audit", keywords: "seo scan report audit paid depth engine findings" },
-      { icon: "contact_mail", label: "Free Audits", href: "/admin/leads", keywords: "leads free audits public prospects funnel pipeline" },
+      // "Free Audits" (/admin/leads) was removed on 2026-09-19. It was the admin
+      // pipeline for the self-serve funnel retired on 2026-09-17 — the anonymous
+      // path to a crawl that the site root no longer offers. Nothing unique went
+      // with it: an audit's public link is shown on its own row in the audit board,
+      // which is where an operator publishes and copies it. The PUBLIC report pages
+      // at /leads/<slug> are untouched and still the way a report is shared.
+      { icon: "fact_check", label: "Audit", href: "/admin/audit", keywords: "seo scan report audit paid depth engine findings free leads public prospects" },
       // Carries the replication keywords the WordPress entry gave up: measuring and
       // replicating a design is a step of this flow now, so this is where a search
       // for it should land.
@@ -56,9 +61,8 @@ export const ADMIN_NAV: NavGroup[] = [
       // must not steer an operator to a screen that no longer does it.
       { icon: "language", label: "WordPress", href: "/admin/wordpress", keywords: "wordpress publish connections sites cms plugin credentials" },
       { icon: "storefront", label: "Citations", href: "/admin/citations", keywords: "citations nap directories listings local business profile aggregator yelp" },
-      { icon: "assignment_turned_in", label: "Citation queue", href: "/admin/citations/queue", keywords: "citation queue work items operator finish listing by hand manual" },
       { icon: "grid_on", label: "Grid Tracking", href: "/admin/grid", keywords: "grid geo heat map local pack rank service area coverage map pack proximity" },
-      { icon: "rocket_launch", label: "Web 2.0", href: "/admin/web2", keywords: "web2 properties placements platforms articles anchors", badge: "test" },
+      { icon: "rocket_launch", label: "Web 2.0", href: "/admin/web2", keywords: "web2 properties placements platforms articles anchors" },
       { icon: "radar", label: "Google Updates", href: "/admin/policy-radar", keywords: "google updates algorithm policy radar changes core update guidance" },
     ],
   },
@@ -105,6 +109,11 @@ export const CLIENT_NAV: NavItem[] = [
   // and absorbs the timeline, so nothing was lost by removing that tab.
   { icon: "view_kanban", label: "My Queue", href: "/client/queue", keywords: "queue work in progress projects tasks updates status roadmap progress milestones" },
   { icon: "fact_check", label: "Audits", href: "/client/audits", keywords: "seo scan report pdf findings" },
+  // PAGES answers the two questions a client used to have to ask a person: "where is my
+  // page?" and "what do you need from me?". The second is the load-bearing one - a page
+  // held on an unanswered first-party question is the only thing on this dashboard that
+  // nobody but the client can unblock.
+  { icon: "article", label: "Pages", href: "/client/pages", keywords: "content pages blog articles questions experience waiting answers published" },
 
   { icon: "summarize", label: "Reports", href: "/client/reports", keywords: "deliverables pdf downloads" },
   { icon: "forum", label: "Requests", href: "/client/requests", keywords: "tickets edits support" },

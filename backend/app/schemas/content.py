@@ -37,15 +37,15 @@ _IN_PIPELINE: frozenset[str] = frozenset(
 # Unions verbatim from content.ts (note the spaces / apostrophes in the
 # frameworks). These are the SAME values front + back - no display remapping.
 PageType = Literal["service", "blog", "local", "gbp_post"]
-# The 7 named page-layout TEMPLATES (the audited section sequences). Mirrors the
+# The 8 named page-layout TEMPLATES (the audited section sequences). Mirrors the
 # canonical keys in ``app.services.page_blueprints.TEMPLATES`` (a unit test asserts
 # they stay identical). The sentinel ``"Auto"`` -> the server derives the template
 # from the page type (service->service, local->local, blog->blog).
 PageTemplate = Literal[
-    "service", "location", "service_area", "blog", "faq", "local", "homepage"
+    "service", "location", "service_area", "blog", "faq", "local", "homepage", "about"
 ]
 _PAGE_TEMPLATES: frozenset[str] = frozenset(
-    {"service", "location", "service_area", "blog", "faq", "local", "homepage"}
+    {"service", "location", "service_area", "blog", "faq", "local", "homepage", "about"}
 )
 PublishTarget = Literal["WordPress", "PDF/Markdown"]
 Framework = Literal["AIDA", "PAS", "BAB", "FAB", "4 Ps", "PASTOR", "4 U's"]
@@ -238,6 +238,25 @@ class ContentJobCreate(BaseModel):
     testimonials: list[str] = Field(default_factory=list, max_length=12)
     unique_data: list[str] = Field(default_factory=list, alias="uniqueData", max_length=12)
     services: list[str] = Field(default_factory=list, max_length=20)
+    # THE THREE EVIDENCE CHANNELS THE WIREFRAME NEEDS AND NOTHING COULD SUPPLY.
+    # `page_blueprints` gates the pricing, team and service-area sections on the client
+    # having actually provided that data (`content_pipeline.compose.evidence_available`),
+    # which is right - a price the client never quoted is the worst thing a generated page
+    # can invent. But the gate read pack keys no request could write, so those sections
+    # were unreachable rather than protected. One plain-text line per item, same shape and
+    # same cap as the four above.
+    pricing: list[str] = Field(default_factory=list, max_length=12)
+    team: list[str] = Field(default_factory=list, max_length=12)
+    service_areas: list[str] = Field(
+        default_factory=list, alias="serviceAreas", max_length=40
+    )
+    # Build this page even though the client already has one targeting the same term
+    # (``app.services.content_collisions``). Default false, so the FIRST attempt at a
+    # duplicate is always refused with the colliding page named - two pages chasing one
+    # keyword compete with each other, and at volume that is money spent to lose.
+    # Deliberately a per-request flag rather than a setting: an operator who has a reason
+    # (a rewrite, a deliberate variant) says so, and it is recorded in the activity entry.
+    allow_duplicates: bool = Field(default=False, alias="allowDuplicates")
     # The target site's extracted design profile (from POST /content/site-design). When
     # supplied it is seeded verbatim into the job's ``source_pack["design_profile"]`` so
     # the publish path builds the page structure to MATCH the client's existing site
@@ -485,6 +504,13 @@ class ContentRecommendation(BaseModel):
     rationale: str = ""
     city: str = ""
     service: str = ""
+    # Set on the WAY OUT when this client already has a page targeting the same term
+    # (``app.services.content_collisions``): the one-sentence clash, naming the existing
+    # page. Shown beside the checkbox so the operator un-ticks it before spending, rather
+    # than meeting a 409 after they have chosen everything. Round-trips harmlessly when
+    # the item is posted back - the generate path re-checks server-side regardless, since a
+    # value the client could edit is not a control.
+    collision: str = ""
 
 
 class ContentResearchRequest(BaseModel):
@@ -544,12 +570,90 @@ class ContentBulkGenerateRequest(BaseModel):
     # dossier is per CLUSTER, so one set of answers legitimately covers a whole batch -
     # which is exactly why asking once, up front, is the right shape.
     experience: dict[str, str] = Field(default_factory=dict, max_length=12)
+    # --- The BATCH this fan-out becomes (0157) --------------------------------
+    # A label the operator will recognise a week later ("March service pages"), and an
+    # optional USD ceiling for the whole run. The ceiling is not the per-client cap and
+    # not the global halt: those bound the agency's exposure, this bounds ONE decision the
+    # operator just made. The worker checks it before spending on each job and HOLDS the
+    # rest rather than failing them, so a batch that hits its ceiling is resumable.
+    allow_duplicates: bool = Field(default=False, alias="allowDuplicates")
+    label: str = Field(default="", max_length=120)
+    cost_ceiling: float | None = Field(default=None, alias="costCeiling", ge=0)
+    # Carried only so the batch header can say what kind of set this was.
+    content_type: str = Field(default="", alias="contentType", max_length=40)
 
 
 class ContentBulkGenerateResponse(BaseModel):
-    """The fan-out result: the public ``CJ-####`` codes of the queued jobs."""
+    """The fan-out result: the public ``CJ-####`` codes of the queued jobs.
+
+    ``batchId`` is the header those jobs hang off, so the caller can open the batch view
+    instead of holding a list of codes. Empty when the batch header could not be created -
+    the jobs are still queued and still run, because grouping is a convenience and losing
+    it must not cost the operator the work they just asked for.
+    """
 
     jobs: list[str]
+    batch_id: str = Field(default="", serialization_alias="batchId")
+
+
+class ContentBatchResponse(BaseModel):
+    """One batch with its live progress. Operational (no frontend contract mirror)."""
+
+    id: str
+    label: str = ""
+    client: str = ""
+    content_type: str = Field(default="", serialization_alias="contentType")
+    cost_ceiling: float | None = Field(default=None, serialization_alias="costCeiling")
+    spent: float = 0.0
+    jobs: int = 0
+    done: int = 0
+    in_review: int = Field(default=0, serialization_alias="inReview")
+    running: int = 0
+    held: int = 0
+    stopped: int = 0
+    created_at: str = Field(default="", serialization_alias="createdAt")
+
+    @classmethod
+    def from_row(cls, row: dict[str, Any]) -> ContentBatchResponse:
+        created = row.get("created_at")
+        ceiling = row.get("cost_ceiling")
+        return cls(
+            id=str(row.get("id") or ""),
+            label=str(row.get("label") or ""),
+            client=str(row.get("client_name") or ""),
+            content_type=str(row.get("content_type") or ""),
+            cost_ceiling=float(ceiling) if ceiling is not None else None,
+            spent=round(float(row.get("spent") or 0), 4),
+            jobs=int(row.get("jobs") or 0),
+            done=int(row.get("done") or 0),
+            in_review=int(row.get("in_review") or 0),
+            running=int(row.get("running") or 0),
+            held=int(row.get("held") or 0),
+            stopped=int(row.get("stopped") or 0),
+            created_at=(
+                created.isoformat() if isinstance(created, datetime) else str(created or "")
+            ),
+        )
+
+
+class ContentBatchUpdate(BaseModel):
+    """Raise (or remove) a batch's ceiling, or rename it."""
+
+    label: str | None = Field(default=None, max_length=120)
+    cost_ceiling: float | None = Field(default=None, alias="costCeiling", ge=0)
+    #: Explicitly clear the ceiling (``costCeiling: null`` is indistinguishable from
+    #: "not supplied" in JSON, so removing a bound is its own flag).
+    clear_ceiling: bool = Field(default=False, alias="clearCeiling")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class ContentBatchResumeResponse(BaseModel):
+    """What a resume actually did: the codes it re-queued, and what it left alone."""
+
+    resumed: list[str] = Field(default_factory=list)
+    skipped: list[str] = Field(default_factory=list)
+    reason: str = ""
 
 
 class SiteDesignRequest(BaseModel):
@@ -570,6 +674,17 @@ class SiteDesignRequest(BaseModel):
     site: str = Field(min_length=1, max_length=2048)
     max_pages: int | None = Field(default=None, alias="maxPages", ge=1, le=10)
     client_id: str | None = Field(default=None, alias="clientId", max_length=64)
+    #: WHAT KIND OF PAGE this URL is (homepage / service / local / blog / faq /
+    #: service_area). A capture measures ONE page, so its section sequence is evidence
+    #: about that page's TYPE and no other - a homepage's hero/trust-bar/services-grid
+    #: order is a correct homepage and a wrong blog post. The kit stores the sequence
+    #: under this key (migration 0154) and the generation path uses it only for pages
+    #: of the same type, falling back to the audited template for the rest.
+    #:
+    #: Omitted, the server INFERS it from the URL path and records '' when it cannot
+    #: tell. Empty is the safe answer, not a guess: an unkeyed sequence is simply not
+    #: used as per-type evidence, so a wrong label can never reshape the wrong pages.
+    page_type: str = Field(default="", alias="pageType", max_length=40)
 
 
 class SiteDesignResponse(BaseModel):

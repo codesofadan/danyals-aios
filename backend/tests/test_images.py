@@ -235,3 +235,178 @@ def test_an_unrelated_path_on_the_base_url_is_preserved() -> None:
     assert f"{store._base_url}{store._route}" == (
         "https://cdn.example.com/files/api/v1/public/content-images"
     )
+
+
+# --------------------------------------------------------------------------- #
+# The quality rung. Left unsent, the provider bills `auto`, which is ADAPTIVE:
+# measured against the pipeline's own scene prompt it settled at 343 output tokens
+# ($0.0103), while `high` on the same model is 5,488 ($0.1656). A page makes five
+# images, so an unchosen rung is a 16x tail on a bill nobody set.
+# --------------------------------------------------------------------------- #
+class _BodyCapturingAPI(OpenAIImageGenerator):
+    """Captures the request body so the wire format can be asserted, not assumed."""
+
+    sent: dict[str, Any]
+
+    def __init__(self, **kw: Any) -> None:
+        super().__init__(api_key="test-key", **kw)
+        self.sent = {}
+
+    def request_json(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        self.sent = dict(kwargs.get("json_body") or {})
+        return {"data": [{"url": "https://cdn.test/a.png"}]}
+
+
+class TestTheQualityRungIsChosenNotInherited:
+    def test_a_configured_rung_rides_on_the_request(self) -> None:
+        api = _BodyCapturingAPI(quality="medium")
+        api.generate("a desk", "alt")
+        assert api.sent["quality"] == "medium"
+
+    def test_an_empty_rung_sends_no_field_at_all(self) -> None:
+        """A provider whose vocabulary differs (dall-e-3 takes standard|hd) must not be
+        handed a value from ours - it 400s. Omitting is the honest default."""
+        api = _BodyCapturingAPI(quality="")
+        api.generate("a desk", "alt")
+        assert "quality" not in api.sent
+
+    def test_whitespace_is_not_a_rung(self) -> None:
+        api = _BodyCapturingAPI(quality="   ")
+        api.generate("a desk", "alt")
+        assert "quality" not in api.sent
+
+    def test_the_model_and_size_still_ride_alongside(self) -> None:
+        api = _BodyCapturingAPI(model="gpt-image-2.5-flare", size="1536x1024", quality="medium")
+        api.generate("a desk", "alt")
+        assert api.sent["model"] == "gpt-image-2.5-flare"
+        assert api.sent["size"] == "1536x1024"
+        assert api.sent["n"] == 1
+
+
+class TestTheShippedDefaultsAreTheMeasuredOnes:
+    """These numbers were measured off the provider's own `usage` block, not taken
+    from a blog. If someone changes the model, the price must move with it - the two
+    are one decision, and a ledger that bills the old model's price is silently wrong."""
+
+    def test_the_model_default_is_the_measured_winner(self) -> None:
+        assert Settings().image_gen_model == "gpt-image-2.5-flare"
+
+    def test_the_quality_default_is_explicit(self) -> None:
+        assert Settings().image_gen_quality == "medium"
+
+    def test_the_ledger_bills_what_the_provider_charges(self) -> None:
+        """194 input + 343 output tokens at $5/$30 per MTok = $0.0111. The old $0.04
+        was gpt-image-1's price and over-billed every image the platform made by 3.6x."""
+        measured = 194 / 1e6 * 5.0 + 343 / 1e6 * 30.0
+        assert Settings().price_image_per_image == pytest.approx(measured, abs=5e-5)
+
+    def test_the_factory_passes_the_rung_through(self) -> None:
+        """A setting nothing reads is a setting that does not exist."""
+        import inspect
+
+        from integrations import content_providers
+
+        src = inspect.getsource(content_providers)
+        assert "quality=settings.image_gen_quality" in src
+
+
+# --------------------------------------------------------------------------- #
+# The ENCODING. Measured on one generation, identical output tokens either way:
+# PNG 1.92 MB, WebP(q82) 0.12 MB. A page carries up to five, so PNG put ~9.6 MB of
+# pictures into the largest-contentful-paint of a page whose whole job is to rank.
+# --------------------------------------------------------------------------- #
+class TestTheEncodingIsRequestedAndCostsNothing:
+    def test_the_format_rides_on_the_request(self) -> None:
+        api = _BodyCapturingAPI(image_format="webp", compression=82)
+        api.generate("a desk", "alt")
+        assert api.sent["output_format"] == "webp"
+        assert api.sent["output_compression"] == 82
+
+    def test_no_format_sends_neither_field(self) -> None:
+        api = _BodyCapturingAPI(image_format="", compression=82)
+        api.generate("a desk", "alt")
+        assert "output_format" not in api.sent
+        assert "output_compression" not in api.sent
+
+    def test_compression_is_withheld_from_png(self) -> None:
+        """output_compression is meaningless for a lossless format, and a provider that
+        does not know the field rejects the entire call over it."""
+        api = _BodyCapturingAPI(image_format="png", compression=82)
+        api.generate("a desk", "alt")
+        assert api.sent["output_format"] == "png"
+        assert "output_compression" not in api.sent
+
+    def test_zero_compression_is_omitted(self) -> None:
+        api = _BodyCapturingAPI(image_format="webp", compression=0)
+        api.generate("a desk", "alt")
+        assert "output_compression" not in api.sent
+
+    def test_the_shipped_default_is_webp(self) -> None:
+        assert Settings().image_gen_format == "webp"
+        assert Settings().image_gen_compression == 82
+
+    def test_the_factory_passes_the_encoding_through(self) -> None:
+        import inspect
+
+        from integrations import content_providers
+
+        src = inspect.getsource(content_providers)
+        assert "image_format=settings.image_gen_format" in src
+        assert "compression=settings.image_gen_compression" in src
+
+
+class TestTheStoredNameMatchesTheBytes:
+    """The store used to name every file .png regardless of content. The moment the
+    provider returned WebP that was a .png full of WebP bytes, served as image/png -
+    a broken image on every published page, and nothing would have raised."""
+
+    @staticmethod
+    def _magic(kind: str) -> bytes:
+        from app.services.content_images import image_suffix  # noqa: F401
+
+        return {
+            "png": bytes([0x89]) + b"PNG" + bytes([13, 10, 26, 10]),
+            "webp": b"RIFF" + bytes(4) + b"WEBPVP8 ",
+            "jpeg": bytes([0xFF, 0xD8, 0xFF, 0xE0]),
+            "gif": b"GIF89a",
+        }[kind]
+
+    @pytest.mark.parametrize(
+        ("kind", "suffix"),
+        [("png", ".png"), ("webp", ".webp"), ("jpeg", ".jpg"), ("gif", ".gif")],
+    )
+    def test_the_suffix_is_read_from_the_content(self, kind: str, suffix: str) -> None:
+        from app.services.content_images import image_suffix
+
+        assert image_suffix(self._magic(kind)) == suffix
+
+    def test_something_unrecognised_stays_png(self) -> None:
+        """Every image made before this existed is a PNG, and its stored name must keep
+        resolving."""
+        from app.services.content_images import image_suffix
+
+        assert image_suffix(b"not an image at all") == ".png"
+
+    def test_the_host_names_a_webp_file_webp(self, tmp_path: Path) -> None:
+        store = LocalContentImageStore(tmp_path, base_url="https://cdn.test")
+        url = store.host_png(self._magic("webp"))
+        assert url.endswith(".webp")
+        assert store.resolve(url.rsplit("/", 1)[-1]) is not None
+
+    def test_the_served_media_type_follows_the_suffix(self) -> None:
+        """A hardcoded image/png was correct only while the provider happened to
+        return PNG."""
+        from app.services.content_images import IMAGE_MEDIA_TYPES
+
+        assert IMAGE_MEDIA_TYPES[".webp"] == "image/webp"
+        assert IMAGE_MEDIA_TYPES[".png"] == "image/png"
+
+    def test_the_publish_push_accepts_every_hosted_type(self) -> None:
+        """The store can mint a name the WordPress media push then refuses to upload -
+        so the two tables have to agree, or the image silently stays on our host."""
+        from app.services.content_images import IMAGE_MEDIA_TYPES
+        from workers.tasks.content import _IMAGE_CONTENT_TYPES
+
+        for suffix, media in IMAGE_MEDIA_TYPES.items():
+            assert _IMAGE_CONTENT_TYPES.get(suffix) == media, suffix
+

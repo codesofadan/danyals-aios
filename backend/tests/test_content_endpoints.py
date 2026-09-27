@@ -735,11 +735,59 @@ async def test_republish_role_gated_for_specialist(
 async def test_republish_moves_done_to_publishing_and_enqueues(
     client: httpx.AsyncClient, repo: FakeContentRepo, published: list[str], wire: Callable[..., None]
 ) -> None:
+    # CONFIRMED, because this page is LIVE (wp_post_id is set) and republishing replaces
+    # whatever is on the client's site. The unconfirmed case is a refusal - see below.
     repo.seed(code="CJ-1", status="done", wp_post_id="4471")
+    wire("owner")
+    resp = await client.post("/api/v1/content/jobs/CJ-1/republish?confirm=true")
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "publishing"
+    assert published == ["CJ-1"]
+
+
+async def test_republishing_over_a_live_page_is_refused_until_confirmed(
+    client: httpx.AsyncClient, repo: FakeContentRepo, published: list[str], wire: Callable[..., None]
+) -> None:
+    """THE EDIT ON THEIR SIDE IS THE ONE THIS PROTECTS. A client fixes a phone number on
+    the page we wrote, an operator re-pushes, and the fix is gone - with no warning and no
+    way to know it happened. The refusal names when we last published and whether we can
+    even tell if it changed."""
+    repo.seed(
+        code="CJ-1", status="done", wp_post_id="4471",
+        published_at=datetime(2026, 9, 1, tzinfo=UTC),
+        published_remote_modified="2026-09-01T10:00:00",
+    )
+    wire("owner")
+    resp = await client.post("/api/v1/content/jobs/CJ-1/republish")
+    assert resp.status_code == 409
+    message = resp.json()["error"]["message"]
+    assert "live on the client's site" in message
+    assert "01 Sep 2026" in message
+    assert "confirm=true" in message
+    assert published == [], "nothing may be queued by a refused republish"
+
+
+async def test_a_page_we_cannot_check_says_so_rather_than_reassuring(
+    client: httpx.AsyncClient, repo: FakeContentRepo, wire: Callable[..., None]
+) -> None:
+    """A page published before provenance was recorded is exactly the one most likely to
+    have been edited, so it gets the BLUNTER sentence, not a softer one."""
+    repo.seed(code="CJ-1", status="done", wp_post_id="4471", published_remote_modified="")
+    wire("owner")
+    resp = await client.post("/api/v1/content/jobs/CJ-1/republish")
+    assert resp.status_code == 409
+    assert "cannot tell us whether it" in resp.json()["error"]["message"]
+
+
+async def test_a_page_never_published_needs_no_confirmation(
+    client: httpx.AsyncClient, repo: FakeContentRepo, published: list[str], wire: Callable[..., None]
+) -> None:
+    """There is nothing on their site to overwrite, so asking would be friction that
+    teaches people to click through the dialog that does matter."""
+    repo.seed(code="CJ-1", status="done")
     wire("owner")
     resp = await client.post("/api/v1/content/jobs/CJ-1/republish")
     assert resp.status_code == 200
-    assert resp.json()["status"] == "publishing"
     assert published == ["CJ-1"]
 
 

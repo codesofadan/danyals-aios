@@ -175,6 +175,7 @@ import base64
 import contextlib
 import hashlib
 import hmac
+import html
 import io
 import json
 import re
@@ -284,8 +285,21 @@ WEB2_PLATFORMS: frozenset[str] = frozenset(
         PLATFORM_WRITEFREELY,
     }
 )
-# Medium is draft-only (its publish API is retired); the pipeline never marks it live.
-DRAFT_ONLY_PLATFORMS: frozenset[str] = frozenset({PLATFORM_MEDIUM})
+# Platforms with NO publishing path at all (M05 REQ-W2-002 / A12: official APIs only).
+# Medium is the worked example - its publishing API was withdrawn, so it is OUT rather
+# than browser-automated. Kept in `WEB2_PLATFORMS` and in the DB enum because historical
+# rows reference it and rewriting their platform would invent history; refused at the
+# publish path instead (`web2_pipeline.run_publish`), before anything is spent.
+UNSUPPORTED_PLATFORMS: frozenset[str] = frozenset({PLATFORM_MEDIUM})
+
+# Draft-only platforms: the API accepts a post but files it as a draft for a human to
+# push live, so a placement here is never `verified`.
+#
+# Medium was the only member and is now `unsupported` above - a stronger statement than
+# draft-only, which still ran a metered draft and called a publisher. The set stays
+# because the CONCEPT is real and `Web2PublishResult.draft_only` is set per-result by
+# platforms that behave this way; it is simply empty until one is catalogued.
+DRAFT_ONLY_PLATFORMS: frozenset[str] = frozenset()
 
 # The credential SHAPE each real client needs, keyed by platform - what
 # ``integrations.web2_credentials`` must parse out of a client's sealed vault JSON
@@ -371,6 +385,23 @@ class Web2Post:
     slug: str | None = None
     tags: tuple[str, ...] = ()
     external_id: str | None = None
+    #: SEO metadata, added for M05 REQ-W2-008 ("SEO fields wherever the platform has
+    #: them"). All OPTIONAL and defaulted, so every one of the 50+ adapters that predates
+    #: them keeps compiling and behaving identically - an adapter opts in by reading the
+    #: field, and a platform whose API has no such field simply never does.
+    #:
+    #: EMPTY MEANS "THIS PLATFORM HAS NO SUCH FIELD", not "we skipped it". The values are
+    #: derived by `app.modules.web2.seo_fields`, which only populates what the platform's
+    #: measured spec says the adapter will actually transmit - so a blank meta description
+    #: on a Bluesky placement is correct rather than missing.
+    meta_description: str = ""
+    canonical_url: str = ""
+    #: The lead image and its alt text (REQ-W2-007). ``image_alt`` without ``image_url``
+    #: is meaningless and is ignored; an image WITHOUT alt text is an accessibility
+    #: regression we would be publishing on a client's behalf, so the pair travels
+    #: together or not at all.
+    image_url: str = ""
+    image_alt: str = ""
 
 
 @dataclass(frozen=True)
@@ -441,6 +472,11 @@ class WordPressComClient(_OAuthWeb2Client):
             body["slug"] = post.slug
         if post.tags:
             body["tags"] = list(post.tags)
+        # WP.com has no meta-description field; `excerpt` is what its themes and feeds
+        # render as the summary, and what most SEO plugins fall back to. Populating it is
+        # the honest equivalent rather than inventing a field the API does not have.
+        if post.meta_description:
+            body["excerpt"] = post.meta_description
         data = self.request_json("POST", url, json_body=body)
         post_url = str(data.get("URL") or data.get("url") or "")
         external_id = data.get("ID") or data.get("id")
@@ -534,13 +570,62 @@ def _html_to_text(html: str) -> str:
 
 
 def _static_page(post: Web2Post) -> str:
-    """A minimal standalone HTML document wrapping the approved article body - what
-    GitHub/GitLab Pages actually serve (they publish raw files, not a CMS post)."""
-    return (
-        '<!doctype html><html><head><meta charset="utf-8">'
-        f"<title>{post.title}</title></head><body>"
-        f"<h1>{post.title}</h1>{post.body_html}</body></html>"
-    )
+    """A standalone HTML document wrapping the approved article - what the Pages hosts
+    actually serve (they publish raw files, not a CMS post).
+
+    THIS IS THE ONE PLACE THE SEO FIELDS ARE FULLY OURS. Every hosted platform decides
+    what to do with a description or a canonical tag; here we write the `<head>`
+    ourselves, so `M05` REQ-W2-008 is not "send the field and hope" but literally what
+    lands on disk. Until this carried them, a GitHub Pages property published a document
+    whose entire head was a charset and a title - no description for the SERP snippet, no
+    social card, no image, and no alt text on an image that did not exist.
+
+    Every field is conditional: an absent value emits NO tag rather than an empty one. An
+    empty `<meta name="description" content="">` is worse than no tag - it tells a search
+    engine we have a description and it is nothing.
+    """
+    head = [
+        '<!doctype html><html lang="en"><head><meta charset="utf-8">',
+        '<meta name="viewport" content="width=device-width, initial-scale=1">',
+        f"<title>{_attr(post.title)}</title>",
+    ]
+    if post.meta_description:
+        head.append(f'<meta name="description" content="{_attr(post.meta_description)}">')
+    if post.canonical_url:
+        head.append(f'<link rel="canonical" href="{_attr(post.canonical_url)}">')
+    # Open Graph + Twitter: the same facts, because a property shared into a feed with no
+    # card is a placement nobody clicks.
+    head.append(f'<meta property="og:title" content="{_attr(post.title)}">')
+    head.append('<meta property="og:type" content="article">')
+    if post.meta_description:
+        head.append(f'<meta property="og:description" content="{_attr(post.meta_description)}">')
+    if post.canonical_url:
+        head.append(f'<meta property="og:url" content="{_attr(post.canonical_url)}">')
+    if post.image_url:
+        head.append(f'<meta property="og:image" content="{_attr(post.image_url)}">')
+        head.append('<meta name="twitter:card" content="summary_large_image">')
+    else:
+        head.append('<meta name="twitter:card" content="summary">')
+    head.append("</head><body>")
+
+    body = [f"<h1>{post.title}</h1>"]
+    if post.image_url:
+        # alt is REQUIRED here, never omitted: an image with no alt text is an
+        # accessibility regression published on a client's behalf, and `seo_fields`
+        # refuses to emit a URL without one so this can only ever be a real value.
+        body.append(f'<img src="{_attr(post.image_url)}" alt="{_attr(post.image_alt)}">')
+    body.append(post.body_html)
+    return "".join(head) + "".join(body) + "</body></html>"
+
+
+def _attr(value: str) -> str:
+    """Escape a value for an HTML attribute.
+
+    Load-bearing rather than cosmetic: a client business name containing an apostrophe or
+    an ampersand - "Tom's Drains & Sons" - would otherwise break out of the attribute and
+    produce a malformed head on a page we publish under their brand.
+    """
+    return html.escape(value, quote=True)
 
 
 _HTML_A_RE = re.compile(r'<a href="([^"]*)">([^<]*)</a>')
@@ -620,14 +705,23 @@ class DevToClient(HttpProviderClient):
     def publish(self, platform: str, post: Web2Post) -> Web2PublishResult:
         if platform != self.platform:
             raise ProviderCallError(f"{self.platform} client cannot publish to {platform}")
-        body = {
-            "article": {
-                "title": post.title,
-                "body_markdown": post.body_html,
-                "published": True,
-                "tags": list(post.tags)[: self._MAX_TAGS],
-            }
+        article: dict[str, object] = {
+            "title": post.title,
+            "body_markdown": post.body_html,
+            "published": True,
+            "tags": list(post.tags)[: self._MAX_TAGS],
         }
+        # All three are documented Articles API fields that were never populated.
+        # `canonical_url` here points at OUR OWN post url when set - never at the client's
+        # page: see HashnodeClient's note for why pointing a property's canonical at the
+        # backlink destination declares the property a duplicate and voids the link.
+        if post.meta_description:
+            article["description"] = post.meta_description
+        if post.canonical_url:
+            article["canonical_url"] = post.canonical_url
+        if post.image_url:
+            article["main_image"] = post.image_url
+        body = {"article": article}
         method, url = ("PUT", f"/articles/{post.external_id}") if post.external_id else ("POST", "/articles")
         data = self.request_json(method, url, json_body=body)
         post_url = str(data.get("url") or "")
@@ -847,7 +941,27 @@ class GhostClient(HttpProviderClient):
         if platform != self.platform:
             raise ProviderCallError(f"{self.platform} client cannot publish to {platform}")
         self._client.headers["Authorization"] = f"Ghost {self._token()}"
-        body = {"posts": [{"title": post.title, "html": post.body_html, "status": "published"}]}
+        entry: dict[str, object] = {
+            "title": post.title, "html": post.body_html, "status": "published",
+        }
+        # Ghost's Admin API exposes these directly (REQ-W2-008). They were never sent, so
+        # every Ghost property published with Ghost's own auto-excerpt as its description
+        # and no social image - fields the platform HAS, left empty.
+        if post.meta_description:
+            entry["meta_description"] = post.meta_description
+            entry["og_description"] = post.meta_description
+            entry["twitter_description"] = post.meta_description
+        if post.canonical_url:
+            entry["canonical_url"] = post.canonical_url
+        if post.image_url:
+            entry["feature_image"] = post.image_url
+            if post.image_alt:
+                entry["feature_image_alt"] = post.image_alt
+        if post.slug:
+            entry["slug"] = post.slug
+        if post.tags:
+            entry["tags"] = [{"name": tag} for tag in post.tags]
+        body = {"posts": [entry]}
         if post.external_id:
             method, url = "PUT", f"/ghost/api/admin/posts/{post.external_id}/?source=html"
         else:

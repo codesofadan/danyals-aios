@@ -49,6 +49,10 @@ INTERNAL_KEYS: frozenset[str] = frozenset({
     "id", "title", "description", "numericValue", "treated_as_static",
     "audits_not_in_this_lighthouse", "opportunity", "failing", "problems",
     "examples", "example_sources", "san_count", "ip_count", "signals",
+    # Where a check LOOKED and on what basis it graded an identity: provenance for a
+    # reviewer, not a finding about the site. The remediation already carries the
+    # consequence in a sentence written for the client.
+    "read", "gbp_identity_basis",
 })
 
 #: A dotted path, a repr, or an exception string - plainly code, never a finding.
@@ -105,6 +109,14 @@ LABELS: dict[str, str] = {
     "header_canonical": "canonical in the response header",
     "html_canonical": "canonical in the page",
     "pages_crawled": "pages crawled",
+    # Local / Google Business Profile. `gbp_identity` is the identity GRADE
+    # (domain / corroborated / unverified) - see analyzers.local.identity_of.
+    "gbp_identity": "Google Business Profile match",
+    "gbp_candidate_name": "the profile we matched",
+    "gbp_candidate_address": "the matched profile's address",
+    "gbp_candidate_website": "the matched profile's website",
+    "address_matches": "pages showing the address",
+    "phone_matches": "pages showing the phone number",
     "pages_measured": "pages measured",
     "not_found_count": "pages returning 404",
     "linked_not_found_count": "broken links from other pages",

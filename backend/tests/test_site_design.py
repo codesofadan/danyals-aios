@@ -645,16 +645,60 @@ _DRAFT = (
 def test_publish_body_wraps_sections_when_profile_present() -> None:
     """A profile present -> a DESIGNED page -> native Gutenberg block markup (not the
     flat class-hooked <div> wrap), matching workers.tasks.content's own
-    _is_full_width_page rule."""
-    row = {"source_pack": {"design_profile": {"layout": {"section_order": ["hero", "services", "cta"]}}}}
+    _is_full_width_page rule.
+
+    The profile here carries a MEASURED, page-type-attributed blueprint, so its own
+    sequence drives the section groups. That attribution is required as of 0154: a
+    capture measures one page, and a sequence with no recorded page type is not applied
+    as evidence about any page type - a homepage's hero/services-grid/stats order is a
+    correct homepage and a wrong blog post. Without it this page would be shaped by the
+    audited template for its page type instead, which is also correct behaviour but is
+    not what this test is about.
+    """
+    row = {
+        "page_type": "service",
+        "source_pack": {
+            "design_profile": {
+                "layout": {
+                    "source_page_type": "service",
+                    # Four sections, not three: a measurement thinner than that is read
+                    # as a FAILED CAPTURE and loses to the audited template
+                    # (`page_blueprints._MIN_MEASURED_SECTIONS`). This test is about
+                    # whose sequence wins, so the fixture has to be a believable page.
+                    "blueprint": [
+                        {"kind": "hero"}, {"kind": "services"}, {"kind": "faq"},
+                        {"kind": "cta"},
+                    ],
+                }
+            }
+        },
+    }
     out = _shape_body_html(row, _DRAFT)
-    # The analyzed section order drives the block groups (aios-sec aios-<kind>).
+    # The measured section order drives the block groups (aios-sec aios-<kind>).
     assert '"className":"aios-sec aios-hero' in out
     assert '"className":"aios-sec aios-services' in out
     assert '"className":"aios-sec aios-cta' in out
     # The content itself is preserved inside the block structure.
     assert "Best Brunch" in out
     assert "Our Services" in out
+
+
+def test_an_unattributed_profile_still_produces_a_designed_page() -> None:
+    """The back-compat half: a profile whose capture never recorded a page type (every
+    kit written before 0154) still yields a DESIGNED Gutenberg page - it is just shaped
+    by the audited template for the page's own type rather than by the unattributed
+    sequence. The regression to guard against is the page falling back to the flat
+    non-block render."""
+    row = {
+        "page_type": "service",
+        "source_pack": {
+            "design_profile": {"layout": {"section_order": ["hero", "services", "cta"]}}
+        },
+    }
+    out = _shape_body_html(row, _DRAFT)
+    assert "<!-- wp:group" in out, "still a native-block page"
+    assert '"className":"aios-sec aios-hero' in out
+    assert "Best Brunch" in out and "Our Services" in out
 
 
 def test_publish_body_unchanged_without_shaping() -> None:

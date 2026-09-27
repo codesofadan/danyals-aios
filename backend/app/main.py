@@ -26,6 +26,7 @@ from app.core.observability import init_sentry
 from app.core.redis import create_redis_client
 from app.db.database import build_admin_pool, build_rls_pool, clear_pools, set_pools
 from app.logging_setup import configure_logging, get_logger
+from app.platform.ai.tracing import configure as configure_tracing
 from app.routers import api_v1
 from app.routers.health import router as health_router
 
@@ -75,10 +76,18 @@ def create_app() -> FastAPI:
     # Export the Anthropic host/key so the vendor SDK picks them up wherever it is
     # constructed (it reads os.environ; pydantic-settings does not populate it).
     apply_provider_env(settings)
+    # Arm (or deliberately leave off) LangSmith. Like `apply_provider_env`, this sets the
+    # environment the vendor SDK reads, which is also how LangGraph's own automatic run
+    # tracing lands in the same project without us calling it. Blank endpoint = off,
+    # which is the default: a trace destination is chosen, never inherited from a package
+    # being installed. Content redaction is on unless an operator turned it off, and
+    # `configure` logs a warning naming the ADR requirement when they have.
+    tracing_state = configure_tracing(settings)
     init_sentry(settings)
 
     get_logger("app.main").info(
-        "app_configured", env=settings.app_env, docs_enabled=settings.docs_enabled
+        "app_configured", env=settings.app_env, docs_enabled=settings.docs_enabled,
+        tracing=tracing_state.describe,
     )
 
     app = FastAPI(

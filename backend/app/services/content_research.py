@@ -129,6 +129,85 @@ _VIDEO_HOSTS = ("youtube.com", "youtu.be", "vimeo.com", "tiktok.com")
 
 _TOKEN_RE = re.compile(r"[a-z0-9]+")
 _PROPER_NOUN_RE = re.compile(r"\b[A-Z][a-z]{2,}(?:\s+[A-Z][a-z]+){0,3}\b")
+#: Lowercase words, used to decide whether a capitalised token is actually a NAME.
+_LOWER_WORD_RE = re.compile(r"\b[a-z]{3,}\b")
+
+#: Capitalised words that are page furniture or sentence glue rather than entities, kept
+#: for the cases the lowercase test below cannot catch - a page that only ever uses
+#: "However" or "Copyright" at the start of a line never shows them in lowercase, so no
+#: amount of corpus evidence would rule them out.
+_NON_ENTITY_WORDS: frozenset[str] = frozenset({
+    # sentence openers / connectives
+    "the", "this", "that", "these", "those", "there", "then", "they", "their", "them",
+    "and", "but", "for", "nor", "yet", "with", "without", "from", "into", "onto",
+    "however", "therefore", "moreover", "meanwhile", "although", "though", "because",
+    "while", "when", "where", "what", "which", "who", "whom", "whose", "why", "how",
+    "also", "still", "just", "even", "only", "both", "each", "every", "some", "many",
+    "most", "more", "much", "less", "few", "such", "same", "other", "another", "any",
+    "you", "your", "yours", "our", "ours", "its", "his", "her", "hers", "not",
+    "can", "could", "should", "would", "will", "shall", "may", "might", "must",
+    "have", "has", "had", "does", "did", "done", "been", "being", "was", "were", "are",
+    "get", "gets", "got", "make", "makes", "made", "take", "takes", "give", "gives",
+    "here", "over", "under", "after", "before", "about", "above", "below", "between",
+    "once", "twice", "always", "never", "often", "sometimes", "usually", "perhaps",
+    # page furniture that is capitalised in nav/footer boilerplate
+    "copyright", "privacy", "policy", "terms", "conditions", "cookie", "cookies",
+    "home", "menu", "search", "login", "signup", "register", "subscribe", "newsletter",
+    "share", "print", "email", "contact", "blog", "news", "read", "find", "help", "support", "call", "click", "learn", "view", "see", "shop", "buy",
+    "next", "previous", "back", "top", "skip", "close", "open", "toggle", "loading",
+    "related", "recent", "popular", "featured", "categories", "category", "tags",
+    "reserved", "rights", "inc", "ltd", "llc", "all",
+})
+
+
+def proper_nouns(text: str) -> set[str]:
+    """The capitalised phrases in ``text`` that are plausibly NAMES.
+
+    WHY A FILTER AT ALL. ``_PROPER_NOUN_RE`` matches any capitalised word, which means
+    every word that happens to START A SENTENCE is harvested as an "entity". Measured on
+    a real run (CJ-4346): the table-stakes entity list the whole ``entity_coverage``
+    dimension is scored against came out as ``['Physical', 'Regular', 'The', 'This',
+    'You']``, with differentiators including ``But``, ``Can`` and ``Copyright``. Those
+    are the words that open sentences on most competitor pages, so they pass the
+    "covered by near-all competitors" test by construction - and any draft written in
+    English trivially contains them, so the dimension scored 100 while measuring nothing
+    and quietly lifted the weighted total.
+
+    THE TEST THAT DOES THE WORK is corpus-internal and needs no word list: a real proper
+    noun is capitalised EVERYWHERE, while a sentence opener also appears in lowercase in
+    the same body of text. So a single capitalised token whose lowercase form occurs
+    anywhere in ``text`` is rejected. ``_NON_ENTITY_WORDS`` only catches the residue -
+    words like "Copyright" that may never appear lowercased on a given page.
+
+    A MULTI-WORD phrase ("Smart Healthcare Pharmacy", "World Health Organization") is
+    kept without that test: consecutive capitalised words are not how English starts a
+    sentence, so the false-positive rate is already low and the signal is the strongest
+    the teardown has.
+    """
+    lowered_seen = set(_LOWER_WORD_RE.findall(text))
+    out: set[str] = set()
+    for match in _PROPER_NOUN_RE.finditer(text):
+        phrase = match.group(0).strip()
+        if not phrase:
+            continue
+        # A sentence that OPENS on a name chains the opener into the phrase: "The World
+        # Health Organization" is one regex match, and storing the article with the name
+        # makes the entity miss a draft that writes "World Health Organization". Strip
+        # leading glue words, then re-judge what is left.
+        words = phrase.split()
+        while len(words) > 1 and words[0].lower() in _NON_ENTITY_WORDS:
+            words.pop(0)
+        phrase = " ".join(words)
+        if not phrase:
+            continue
+        if len(words) > 1:
+            out.add(phrase)
+            continue
+        key = phrase.lower()
+        if key in _NON_ENTITY_WORDS or key in lowered_seen:
+            continue
+        out.add(phrase)
+    return out
 _YEAR_RE = re.compile(r"\b(?:20[12]\d|19\d\d)\b")
 _TAG_RE = re.compile(r"<[^>]+>")
 _HEADING_RE = re.compile(r"<h([1-3])[^>]*>(.*?)</h\1>", re.IGNORECASE | re.DOTALL)
@@ -567,7 +646,7 @@ def salient_entities(serp: SerpResult, *, limit: int = 8) -> list[str]:
     counter: Counter[str] = Counter()
     for item in serp.organic:
         text = item.title + " " + (item.snippet or "")
-        for noun in {m.group(0) for m in _PROPER_NOUN_RE.finditer(text)}:
+        for noun in proper_nouns(text):
             counter[noun] += 1
     salient = [entity for entity, n in counter.most_common() if n >= 2]
     if not salient:  # thin SERP: keep the most common single-mention nouns
@@ -754,7 +833,7 @@ def parse_teardown_page(url: str, position: int, html: str) -> TeardownPage:
     text = re.sub(r"\s+", " ", text)
     word_count = len(text.split())
 
-    entities = sorted({m.group(0) for m in _PROPER_NOUN_RE.finditer(text)})
+    entities = sorted(proper_nouns(text))
 
     schema_types = _schema_types_from_html(html)
     media_count = len(_MEDIA_RE.findall(html))

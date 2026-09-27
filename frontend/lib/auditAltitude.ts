@@ -225,13 +225,43 @@ export function coveragePct(r: Pick<Rollup, "checks_ran" | "checks_applicable">)
  * Why a dimension is unmeasured, in the operator's language. The remedies differ
  * completely, so collapsing them into "no data" would hide the actionable one.
  */
+const SKIP_REASON_TEXT: Record<string, string> = {
+  source_not_permitted: "this tier does not buy the data these checks need",
+  needs_provider: "the data provider for these checks is not connected",
+  ai_assisted_not_run: "these checks need the AI specialists, which only Advanced runs",
+  needs_search_console: "these checks need a connected Search Console property",
+  not_dispatched_by_this_command: "these checks are not part of this audit command",
+  not_in_selected_dimensions: "not part of the selected audit types",
+  owner_decision: "deliberately excluded by an owner decision",
+  not_yet_built: "these checks are catalogued but not implemented yet",
+  analyzer_path_unresolved: "no working analyzer for these checks",
+  no_finding_emitted: "checks ran but returned nothing",
+};
+
+/**
+ * Why a dimension is unmeasured, in the operator's language.
+ *
+ * REPORTS THE DOMINANT REASON, not the first one that happens to be non-zero. The
+ * previous version tested a fixed list in order and fell through to a bare "not run"
+ * for every reason it did not name, which was most of them. On a real standard-depth
+ * run, off-page skipped 24 checks as `ai_assisted_not_run`, 7 as
+ * `not_dispatched_by_this_command` and 2 as `needs_provider`, and the card said
+ * "not run": true, useless, and hiding the one fact that would have told an operator
+ * to re-run at Advanced.
+ *
+ * The count travels with the reason for the same purpose. "33 of 71 checks" is a
+ * different conversation from "2 of 71", and the remedies differ completely.
+ */
 export function notMeasuredReason(r: Pick<Rollup, "skip_reasons">): string {
-  const s = r.skip_reasons || {};
-  if (s.source_not_permitted) return "this tier does not run the required data source";
-  if (s.analyzer_path_unresolved) return "no working analyzer for these checks";
-  if (s.not_in_selected_dimensions) return "not part of the selected audit types";
-  if (s.no_finding_emitted) return "checks ran but returned nothing";
-  return "not run";
+  const entries = Object.entries(r.skip_reasons || {}).filter(([, n]) => n > 0);
+  if (!entries.length) return "not run";
+  // Ties break on the reason name so the text is stable between renders rather than
+  // dependent on object key order.
+  const [reason, count] = entries.sort(
+    (a, b) => b[1] - a[1] || a[0].localeCompare(b[0]),
+  )[0];
+  const text = SKIP_REASON_TEXT[reason] ?? reason.replace(/_/g, " ");
+  return `${count} check${count === 1 ? "" : "s"}: ${text}`;
 }
 
 /** Score bands, matching the existing workspace (>=80 ok, 65-79 warn, <65 crit). */

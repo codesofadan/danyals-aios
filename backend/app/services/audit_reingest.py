@@ -109,6 +109,9 @@ def reingest_audit(
         run_uuid=str(row.get("run_uuid") or ""),
         tier=tier_label.lower(),
         types=list(row.get("types") or []),
+        # Same snapshot the worker passes: the verdict is about this run, so a rebuild
+        # must judge it against the budget the run was actually created with.
+        planned_pages=int(row.get("max_pages") or 0),
     )
     logger.info(
         "audit_reingest_rows",
@@ -153,7 +156,15 @@ def reingest_audit(
             audit_report.build(
                 audit_id=audit_id,
                 out_dir=out_dir,
-                meta={**meta, "generated_at": _utc_label(row.get("finished_at"))},
+                meta={
+                    **meta,
+                    "generated_at": _utc_label(row.get("finished_at")),
+                    # The verdict the rebuild just computed, so a rebuilt report opens with
+                    # the same banner a fresh one would (0160). The WORKBOOK does not read
+                    # these keys - it is the REPORT that carries the banner.
+                    "crawl_verdict": ingested.crawl_verdict,
+                    "crawl_note": ingested.crawl_note,
+                },
             )
             report_built = True
         except Exception as exc:

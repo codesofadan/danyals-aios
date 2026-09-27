@@ -82,7 +82,20 @@ _RUN_FILE = "run.json"
 # and pretending otherwise is the defect this replaced. Depth decides how much
 # PAID corroboration is bought on top.
 DEPTH_SCOPE: dict[str, dict[str, bool]] = {
-    "free": {"psi": False, "serper": False, "places": False,
+    # PSI IS ON AT FREE DEPTH, and it does not break the free tier's $0 guarantee.
+    #
+    # Google's PageSpeed Insights API is free - bounded by a request quota, not by a bill -
+    # so it is not one of the "paid integrations" the free mode exists to keep out. The
+    # engine used to clear it anyway, which bought no spend protection and cost every free
+    # audit its Core Web Vitals: the most persuasive page in a sales audit, missing from the
+    # audit whose whole job is to persuade. The engine's own --mode help text always said
+    # free mode keeps "free PSI (rate-limited)"; the code disagreed, and the help text was
+    # right. Fixed on both sides (2026-09-26, operator's decision).
+    #
+    # Everything that costs money stays off here, and `--mode free` still hard-clears Moz,
+    # Serper, Places and citations engine-side, so `pricing.audit_cost` continues to return
+    # a DERIVED 0.0 from the run's own reported mode rather than an asserted one.
+    "free": {"psi": True, "serper": False, "places": False,
              "agents": False, "narrative": False},
     "standard": {"psi": True, "serper": True, "places": False,
                  "agents": False, "narrative": False},
@@ -108,6 +121,36 @@ class AuditEngineConfig:
     # Kept separate from `max_pages` so tuning the paid audit's depth can never
     # silently widen an unauthenticated, unbilled crawl.
     free_max_pages: int = 15
+    # THE BACKLINK PROVIDER'S CREDENTIAL, PASSED THROUGH TO THE CHILD.
+    #
+    # The engine's 39 backlink checks are the whole of its off-page dimension, and
+    # they read ONE DataForSEO profile (`backlinks/summary` + anchors, ~5c for all
+    # 39). The engine looks the credential up with `os.getenv("DATAFORSEO_LOGIN")`.
+    #
+    # It lived only in the PLATFORM's `.env`, which pydantic-settings reads into
+    # `Settings` WITHOUT exporting to `os.environ` - so the spawned engine never saw
+    # it, `client.profile()` returned an error, and all 39 checks emitted `n_a`.
+    # Every off-page score has been null since the dimension was built.
+    #
+    # Injected rather than copied into the engine's own `.env`: one source of truth,
+    # so rotating the credential in the platform cannot leave a stale copy behind in
+    # a sibling repo. `load_dotenv` does not override an existing variable, so an
+    # injected value correctly wins over anything in that file.
+    dataforseo_login: str = ""
+    dataforseo_password: str = ""
+    # THE MODEL TIERS, PASSED THROUGH FOR THE SAME REASON AS THE CREDENTIAL ABOVE.
+    #
+    # The engine resolves its agent model with `os.getenv("AUDIT_AGENT_MODEL")` and its
+    # narrative with `AUDIT_NARRATIVE_MODEL` falling back to the agent one - and falling
+    # back again, if neither is set, to a hardcoded Opus tier. The platform's `.env` is
+    # not in the engine's environment, so on a box where the variable was never exported
+    # a deployment that has deliberately moved off Opus still pays Opus prices for every
+    # audit narrative, with nothing anywhere reporting it.
+    #
+    # Blank leaves the engine's own resolution untouched (see the note on writing empty
+    # strings above - a blank would MASK the engine's own `.env`).
+    agent_model: str = ""
+    narrative_model: str = ""
 
 
 @dataclass(frozen=True)
@@ -263,11 +306,13 @@ def build_argv(
     # SCOPE (DECISIONS_LOG D-1): free = CONDENSED (~10-15 pages). The full
     # multi-agent narrative run is the paid, authenticated product.
     #
-    # KNOWN ENGINE INCONSISTENCY: the engine's own ``--mode`` help text says free
-    # mode keeps "free PSI (rate-limited)", but the code sets ``psi = False``.
-    # PageSpeed is genuinely free-tier, so a condensed free audit could carry
-    # Core Web Vitals. Not changed here: the audit engine is a separate product
-    # with its own CI and is explicitly out of the recovery's change scope.
+    # PSI: the engine now HONOURS ``--psi`` in free mode (its ``--mode`` help text
+    # always promised "free PSI (rate-limited)"; the code used to clear it, and the
+    # help text was right - fixed on both sides). This path still passes ``--no-psi``
+    # on purpose: it is UNAUTHENTICATED, so every request it serves is a request an
+    # abuser chooses the volume of, and PageSpeed's free tier is a QUOTA. Burning that
+    # quota anonymously would take Core Web Vitals away from the paying audits that
+    # share it. The authenticated free DEPTH takes the vitals; this funnel does not.
     # `mode` is HONOURED here, never overridden. The bug this replaced was
     # precisely a silent override in this spot - the caller asked for "free" and
     # got "auto" with every provider on. Hardcoding "free" instead would be the
@@ -398,6 +443,16 @@ def run_audit(
     )
 
     child_env = {**os.environ, "COLUMNS": "1000", "PYTHONIOENCODING": "utf-8"}
+    # Only when we HOLD them. Writing an empty string would be worse than writing
+    # nothing: `load_dotenv` leaves an already-set variable alone, so a blank injected
+    # here would MASK a credential the engine's own `.env` might legitimately carry.
+    if cfg.dataforseo_login and cfg.dataforseo_password:
+        child_env["DATAFORSEO_LOGIN"] = cfg.dataforseo_login
+        child_env["DATAFORSEO_PASSWORD"] = cfg.dataforseo_password
+    if cfg.agent_model:
+        child_env["AUDIT_AGENT_MODEL"] = cfg.agent_model
+    if cfg.narrative_model:
+        child_env["AUDIT_NARRATIVE_MODEL"] = cfg.narrative_model
     started = time.monotonic()
     logger.info("audit_engine_start", mode=mode, max_pages=pages)
     try:

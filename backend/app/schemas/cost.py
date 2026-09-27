@@ -78,7 +78,7 @@ DIAL_FEATURES: tuple[DialFeatureMeta, ...] = (
     # the backlink spend.
     DialFeatureMeta(key="citation_discovery", label="Citation Discovery", icon="travel_explore", provider="Serper", note="Listing discovery for the citation audit (near-free per business)", default_mode="api"),
     DialFeatureMeta(key="local_seo", label="Local SEO", icon="storefront", provider="Places", note="GBP + map-pack lookups", default_mode="byhand"),
-    DialFeatureMeta(key="keywords", label="Keyword Research", icon="search", provider="Serper", note="Paused this cycle", default_mode="off"),
+    DialFeatureMeta(key="keywords", label="Keyword Research", icon="search", provider="DataForSEO", note="Volume / difficulty / CPC pulls", default_mode="off"),  # DataForSEO, not Serper: `keyword_research.tasks` meters provider="DataForSEO" (it buys the metrics Serper cannot give), so a label reading "Serper" told the operator they were authorising the wrong vendor.
     # Part 6B — the Client-Context / AI-memory module's two AI spends. Both flow
     # through the SAME gate as every other paid call (P6B-4's Gated* wrappers), so
     # ops can throttle context AI to off/byhand/api on the money-dial and no

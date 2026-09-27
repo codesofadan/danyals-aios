@@ -7,6 +7,8 @@ import { useContentJobs, useContentReviewQueue, useReviewContentJob } from "@/li
 import { useMe } from "@/lib/hooks/portal";
 import { useSpendHalted } from "@/lib/hooks/cost";
 import ContentKpis from "./ContentKpis";
+import BatchBoard from "./BatchBoard";
+import ReadinessBoard from "@/components/ops/ReadinessBoard";
 import PipelineBoard from "./PipelineBoard";
 import ReviewGate, { type ReviewAction } from "./ReviewGate";
 import ReviewPreview from "./ReviewPreview";
@@ -72,6 +74,11 @@ export default function ContentWorkspace() {
 
       <ContentKpis />
 
+      {/* WHETHER TONIGHT'S THIRTY PAGES WILL ACTUALLY DRAFT. A missing writer or SERP key
+          holds every page at drafting with an honest $0 - correct, and invisible until
+          after you queue them. */}
+      <ReadinessBoard group="Content" title="Before you queue pages" />
+
       {/* THE BOARD IS THE HOME. Creating content used to happen in a five-step
           wizard mounted INLINE here, so one scrolling page carried making,
           watching and approving at once - the operator's own read was that it
@@ -126,6 +133,21 @@ export default function ContentWorkspace() {
           </div>
         </div>
       )}
+
+      {/* BULK BUILDS, as one thing each. A fan-out creates independent jobs on purpose -
+          that is what lets thirty pages run in parallel - but nothing used to record that
+          they belonged together, so a thirty-page run was thirty rows in a board of every
+          job the agency has ever had. This is where a batch's progress, its spend against
+          its ceiling, and any page it left HELD are answerable. */}
+      <div style={{ display: "flex", alignItems: "center", gap: 12, margin: "var(--s-7) 0 var(--s-5)" }}>
+        <div>
+          <div className="ct">Bulk builds</div>
+          <div className="cs">
+            Each research fan-out, its spend, and any page waiting on budget or a key.
+          </div>
+        </div>
+      </div>
+      <BatchBoard />
 
       <div style={{ marginTop: "var(--s-6, 20px)" }} />
 

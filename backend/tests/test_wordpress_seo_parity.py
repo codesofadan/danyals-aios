@@ -599,3 +599,47 @@ def test_connection_warning_lists_exactly_what_publish_drops(method: str) -> Non
     # inflates a connection verdict from 113 characters to 299, and the screen that
     # renders it already clips one line.
     assert "(" not in note
+
+
+# --------------------------------------------------------------------------- #
+# The SOCIAL CARD (1.14.0). Yoast and Rank Math both DERIVE a card from the SEO
+# title/description when no explicit value is set, which is why its absence was
+# invisible - but the derivation runs through each plugin's own title TEMPLATE, so the
+# card was neither controllable nor predictable. AIOS's own audit engine flags
+# incomplete Open Graph (TECH-086/087), including on pages this plugin had just
+# created.
+# --------------------------------------------------------------------------- #
+def test_the_plugin_payload_names_the_social_card_image() -> None:
+    """The hero image IS the card image. Both SEO plugins usually fall back to the
+    featured image, but "usually" is not a guarantee and a card with no image is the
+    difference between a shared link that gets clicked and one that does not."""
+    from workers.tasks.content import _plugin_payload
+
+    row = _publish_row()
+    payload = _plugin_payload(row, str(row["draft_md"]), "Best Brunch in Portland")
+    assert payload["featured_image_url"], "precondition: this draft has a hero image"
+    assert payload["og_image_url"] == payload["featured_image_url"]
+
+
+def test_the_card_title_and_description_are_left_to_the_search_snippet() -> None:
+    """NOT sent, on purpose: the PLUGIN falls them back to meta_title /
+    meta_description, so a page whose social copy nobody wrote separately says its
+    search snippet. Sending a duplicate of the same two strings from here would add a
+    second place for them to drift - the exact defect this file was written about."""
+    from workers.tasks.content import _plugin_payload
+
+    row = _publish_row()
+    payload = _plugin_payload(row, str(row["draft_md"]), "Best Brunch in Portland")
+    assert "og_title" not in payload
+    assert "og_description" not in payload
+
+
+def test_a_draft_with_no_hero_image_names_no_card_image() -> None:
+    """No invented image: a page with no hero has no card image, and the plugin then
+    writes none rather than a broken URL."""
+    from workers.tasks.content import _plugin_payload
+
+    row = _publish_row(draft_md="# Best Brunch in Portland\n\nBody copy, no image.\n")
+    payload = _plugin_payload(row, str(row["draft_md"]), "Best Brunch in Portland")
+    assert "featured_image_url" not in payload
+    assert "og_image_url" not in payload

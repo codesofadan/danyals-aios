@@ -1,31 +1,30 @@
 "use client";
 
-// The QA verdict, at the moment of approval.
+// What a reviewer is shown at the moment of approval.
 //
-// DECISION D-4 asks for "advisory + mandatory acknowledgement". Only the advisory
-// half existed. The 14-dimension scorecard was rendered — but on the FIFTH tab of
-// a preview the reviewer did not have to open, while both Approve buttons showed
-// no score at all. So the one enforced quality boundary in the whole platform was
-// a button clicked with no quality information in front of it, on an action that
-// publishes to a client's live site.
+// WHAT CHANGED, 2026-09-26 (the operator's decision). This dialog used to lead with the
+// QA scorecard's weighted total — "61/100 weighted, does not pass" — and require an
+// acknowledgement of it. The number is gone. Its own module declares the threshold and the
+// weight vector uncalibrated against ranking outcomes or a human SEO grade, so it cannot
+// support the verdict it reads like: a reviewer who trusts it is misled, and one who
+// learns to ignore it is reading noise on the one screen where attention matters.
 //
-// This is deliberately NOT a second gate. The score stays advisory: a reviewer can
-// approve a draft that scored badly, because the human is the authority and the
-// threshold is still uncalibrated (P7A-11 — the golden set is 2 cases against the
-// 30-50 the decision log asks for). What changes is that they cannot do it
-// unknowingly. The acknowledgement travels in the review note, so the activity log
-// records what the approver was shown.
+// WHAT REPLACES IT is the half that was never provisional. The deterministic detections
+// underneath the score are not a matter of calibration — either the draft asserts
+// something that traces to nothing supplied, or it does not — so they arrive here as named
+// problems in the reviewer's own language: "a claim here has no source", "no first-hand
+// experience". A clean draft shows none, which is exactly what a clean draft should show.
 //
-// A DURABLE COLUMN IS STILL MISSING. R3A-36 specifies qa_acknowledged_by /
-// qa_acknowledged_at / qa_override_reason; none of them exist. Until they do, the
-// note is the audit trail — honest, searchable, and weaker than a column.
+// The scorecard itself is untouched: still computed, still stored, still readable at
+// /content/jobs/{code}/qa for the calibration work that would let it earn authority later.
+// This is a change to what gets PUT IN FRONT OF A PERSON, not to what gets measured.
+//
+// Still not a gate. A reviewer may approve a draft carrying problems — the human is the
+// authority — and the note records what they were shown, so "approved with an ungrounded
+// claim flagged" is answerable afterwards.
 
-import { useContentQa } from "@/lib/hooks/content";
+import { useReviewFlags, type ReviewFlag } from "@/lib/hooks/content";
 import ConfirmDialog from "@/components/ui/ConfirmDialog";
-import { qaVerdict } from "@/lib/content";
-
-/** The floor a single dimension must clear (doctrine §11). */
-const DIMENSION_FLOOR = 70;
 
 export type ApproveGateProps = {
   /** The job awaiting approval, or null when the gate is closed. */
@@ -33,9 +32,30 @@ export type ApproveGateProps = {
   title: string;
   pending?: boolean;
   onCancel: () => void;
-  /** Receives the note recording what the approver acknowledged. */
+  /** Receives the note recording what the approver was shown. */
   onConfirm: (note: string) => void;
 };
+
+/** One flag, rendered as a problem or a quieter note. */
+function FlagRow({ flag }: { flag: ReviewFlag }) {
+  const isProblem = flag.kind === "problem";
+  return (
+    <div
+      style={{
+        marginTop: "var(--s-3)",
+        paddingLeft: 10,
+        borderLeft: `3px solid ${isProblem ? "var(--crit)" : "var(--warn)"}`,
+      }}
+    >
+      <div style={{ fontWeight: 700, color: isProblem ? "var(--crit)" : "var(--ink)" }}>
+        {flag.title}
+      </div>
+      <div className="cs" style={{ marginTop: 2 }}>
+        {flag.detail}
+      </div>
+    </div>
+  );
+}
 
 export default function ApproveGate({
   code,
@@ -44,75 +64,55 @@ export default function ApproveGate({
   onCancel,
   onConfirm,
 }: ApproveGateProps) {
-  const qaQ = useContentQa(code);
-  const qa = qaQ.data?.qa ?? null;
-  const verdict = qaVerdict(qa);
+  const flagsQ = useReviewFlags(code);
+  const flags = flagsQ.data?.flags ?? [];
+  const problems = flags.filter((f) => f.kind === "problem");
 
-  const weak = qa
-    ? Object.entries(qa.dimensions)
-        .filter(([, score]) => score < DIMENSION_FLOOR)
-        .sort((a, b) => a[1] - b[1])
-    : [];
-
-  // The note is the audit trail. It states the score the approver was shown, so
-  // "approved at 61" is answerable later without re-deriving anything.
-  const note = qa
-    ? `QA acknowledged: ${verdict ? `${verdict.total}/100 weighted, ${verdict.passed ? "passed" : "did not pass"}` : "not scored"}` +
-      (qa.provisional ? " (provisional weights)" : "") +
-      (weak.length ? `; below floor: ${weak.map(([d]) => d).join(", ")}` : "")
-    : qaQ.isError
-      ? "QA acknowledged: the scorecard could not be loaded at approval time"
-      : "QA acknowledged: no scorecard was available";
+  // The note is the audit trail. It names the problems the approver was shown, so
+  // "approved with an ungrounded claim flagged" is answerable later without re-deriving
+  // anything. A clean draft records that it was clean, which is equally worth knowing.
+  const note = flagsQ.isError
+    ? "Approved without the review checks: they could not be loaded at approval time."
+    : flags.length === 0
+      ? "Approved; the automated checks raised nothing."
+      : `Approved with ${flags.length} check${flags.length === 1 ? "" : "s"} raised: ` +
+        flags.map((f) => f.title).join("; ");
 
   return (
     <ConfirmDialog
       open={code !== null}
-      // Never "danger": approving good work is the normal, desirable path. The
-      // tone rises only when the draft actually failed its own scorecard.
-      tone={qa && !qa.passed ? "danger" : "normal"}
-      title={qa && !qa.passed ? "Approve despite a failing QA score?" : "Approve and publish?"}
+      // The tone rises only when a doctrine floor was actually tripped. Approving good
+      // work is the normal, desirable path and should not look like a warning.
+      tone={problems.length > 0 ? "danger" : "normal"}
+      title={
+        problems.length > 0 ? "Approve despite what we found?" : "Approve and publish?"
+      }
       body={
         <>
           <div>
             <b>{title}</b> will be published to the client&rsquo;s site.
           </div>
           <div style={{ marginTop: "var(--s-5)" }}>
-            {qaQ.isLoading ? (
-              "Loading the QA scorecard…"
-            ) : qaQ.isError ? (
-              // Say it plainly rather than implying a pass by omission.
+            {flagsQ.isLoading ? (
+              "Checking the draft…"
+            ) : flagsQ.isError ? (
+              // Said plainly rather than implying a clean draft by omission.
               <span style={{ color: "var(--crit)" }}>
-                The QA scorecard could not be loaded, so this approval is being made
-                without it.
+                The automated checks could not be loaded, so this approval is being made
+                without them.
               </span>
-            ) : qa ? (
-              <>
-                <span
-                  style={{
-                    fontWeight: 800,
-                    color: qa.passed ? "var(--ok)" : "var(--crit)",
-                  }}
-                >
-                  {verdict ? `${verdict.total}/100` : "not scored"}
-                </span>{" "}
-                weighted — {qa.passed ? "passes" : "does not pass"} the advisory
-                threshold
-                {qa.provisional ? " (weights still provisional)" : ""}.
-                {weak.length > 0 ? (
-                  <div style={{ marginTop: "var(--s-3)", color: "var(--body)" }}>
-                    Below the {DIMENSION_FLOOR} floor:{" "}
-                    <b>{weak.map(([d, s]) => `${d} (${s})`).join(", ")}</b>
-                  </div>
-                ) : null}
-              </>
+            ) : flags.length === 0 ? (
+              <span style={{ color: "var(--ok)", fontWeight: 700 }}>
+                Nothing was flagged in this draft.
+              </span>
             ) : (
-              "This draft has no QA scorecard."
+              flags.map((f) => <FlagRow key={f.key} flag={f} />)
             )}
           </div>
         </>
       }
-      reassurance="The score is advisory — your approval is the gate. This records which score you were shown."
-      confirmLabel="Acknowledge & approve"
+      reassurance="Your read is the gate — these are the checks a machine can make. This records what you were shown."
+      confirmLabel={problems.length > 0 ? "Approve anyway" : "Approve & publish"}
       pending={pending}
       onCancel={onCancel}
       onConfirm={() => onConfirm(note)}

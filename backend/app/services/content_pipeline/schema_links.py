@@ -190,12 +190,22 @@ def plan_internal_links(
     #
     # So the budget is spent in this order:
     #   1. cluster targets that HAVE a real URL - topical and clickable, the whole point
-    #   2. other registry entries - real pages, off-topic, better than a dead end
+    #   2. other registry entries that are TOPICALLY RELATED to this page - real pages
+    #      the reader might actually want next
     #   3. cluster targets with no URL yet - recorded unresolved so the operator sees
     #      which sibling pages have not been published
     # 2 still precedes 3 for the original reason, which remains correct: an unresolved
     # target renders nothing, so letting it consume the cap while a real page waits
     # costs the reader an actual link.
+    #
+    # TIER 2 IS FILTERED BY RELATEDNESS, and it did not used to be. It took ANY registry
+    # entry, justified as "real pages, off-topic, better than a dead end" - which
+    # contradicts the paragraph above it. Measured on a real run (CJ-4346): an article
+    # about physical fitness shipped links reading "SEO in 2026" and "skincare routine
+    # for pakistani skin", because those were the client's most recently published pages.
+    # That is not a weaker topical signal, it is a misleading one, and it is worse for
+    # the reader than a shorter list. A page with no related siblings now carries fewer
+    # links, which is the honest outcome.
     for target in targets:
         key = target.strip().lower()
         if not key or key == own or key in seen or len(links) >= limit:
@@ -204,9 +214,12 @@ def plan_internal_links(
         if hit is not None:
             _take(hit[0], hit[1])
 
+    context_terms = [own, *(t.strip().lower() for t in targets if t.strip())]
     for keyword, url in registry.items():
         key = keyword.lower()
         if key == own or key in seen or len(links) >= limit:
+            continue
+        if not any(_topically_related(key, term) for term in context_terms if term):
             continue
         _take(keyword, url)
 
@@ -216,6 +229,48 @@ def plan_internal_links(
             continue
         _take(target.strip(), "")
     return links
+
+
+#: Words that carry no topic, so sharing one is not relatedness. Kept small on purpose:
+#: this is a stopword list for a two-phrase comparison, not a language model.
+_LINK_STOPWORDS: frozenset[str] = frozenset({
+    "the", "a", "an", "and", "or", "for", "to", "in", "on", "of", "with", "by", "at",
+    "is", "are", "be", "best", "top", "how", "what", "why", "guide", "tips", "your",
+    "you", "near", "me", "vs", "versus", "from", "about", "into",
+})
+
+
+def _topic_tokens(phrase: str) -> set[str]:
+    """The meaning-bearing words of a keyword phrase."""
+    import re as _re
+
+    return {
+        t for t in _re.findall(r"[a-z0-9]+", phrase.lower())
+        if len(t) > 2 and t not in _LINK_STOPWORDS
+    }
+
+
+def _topically_related(candidate: str, context: str) -> bool:
+    """Whether two keyword phrases are about the same thing, by shared topic words.
+
+    Deliberately a token test and not a model call: this decision runs inside a FREE,
+    deterministic stage (``run_schema_links`` makes no LLM call by design), and paying
+    for an opinion about two short strings would change that property for very little.
+
+    Stemming is approximated by a prefix match so "fitness" relates to "fit" and
+    "training" to "train" - crude, but it errs toward the shorter link list rather than
+    toward a confident wrong link, which is the direction this fix is about.
+    """
+    a, b = _topic_tokens(candidate), _topic_tokens(context)
+    if not a or not b:
+        return False
+    if a & b:
+        return True
+    return any(
+        x.startswith(y) or y.startswith(x)
+        for x in a for y in b
+        if min(len(x), len(y)) >= 4
+    )
 
 
 def render_related_block(draft_md: str, links: list[InternalLink]) -> str:

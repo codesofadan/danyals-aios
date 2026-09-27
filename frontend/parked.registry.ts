@@ -51,6 +51,78 @@ export type ParkedEntry = {
 };
 
 export const PARKED: ParkedEntry[] = [
+  // --- The citation WORK QUEUE, and the two components only it mounted --------
+  // Unmounted 2026-09-22 on owner instruction: the admin page `/admin/citations/queue`
+  // was deleted, deliberately WITHOUT touching the component, the queue API, or the
+  // `citation_queue:read`/`:write` operator scopes. The queue itself is unchanged and
+  // is worked through the Citation Assistant extension, which is what actually polls
+  // it. Deleting the component would throw away the only dashboard-side surface for a
+  // backend that is intact, tested and in use.
+  //
+  // ExtensionCallout and SpecDrawer are listed beside it because CitationQueue was
+  // their ONLY mount point - removing one page orphaned a three-component subtree, and
+  // recording only the page would leave the other two reading as abandoned code.
+  {
+    path: "offpage/CitationQueue.tsx",
+    status: "operator-removed",
+    unmountedBy: "the 2026-09-22 citation-queue page removal (owner instruction)",
+    reason:
+      "The admin page that fronted the human citation queue was removed. The queue " +
+      "itself - claim with a lease, pre-filled fields, and a completion that FETCHES " +
+      "the public URL and looks for the business before it counts - is unchanged, and " +
+      "the Citation Assistant extension is now its only surface.",
+    reEnableWhen:
+      "A dashboard-side queue is wanted again: restore `app/admin/citations/queue/" +
+      "page.tsx` (it rendered this component and nothing else) and its nav entry. " +
+      "Nothing needs repairing - the component and its backend were green when the " +
+      "page was deleted.",
+  },
+  {
+    path: "offpage/ExtensionCallout.tsx",
+    status: "operator-removed",
+    unmountedBy: "the 2026-09-22 citation-queue page removal (owner instruction)",
+    reason:
+      "Mounted only by CitationQueue - the panel that tells an operator to install " +
+      "the Citation Assistant. It went wherever that component went.",
+    reEnableWhen: "CitationQueue comes back; it is the only thing that renders this.",
+  },
+  {
+    path: "offpage/SpecDrawer.tsx",
+    status: "operator-removed",
+    unmountedBy: "the 2026-09-22 citation-queue page removal (owner instruction)",
+    reason:
+      "Mounted only by CitationQueue - the per-directory submission spec an operator " +
+      "reads while filling a form by hand.",
+    reEnableWhen: "CitationQueue comes back; it is the only thing that renders this.",
+  },
+
+  // --- The Web 2.0 SINGLE-ARTICLE flow ---------------------------------------
+  // Unmounted 2026-09-22 on owner instruction. Read this entry together with the
+  // campaign one below, because the pair is the actual history: on 2026-09-12 the
+  // campaign (batch) door was parked IN FAVOUR of this single-article door, on the
+  // stated grounds that "two doors into the same table with different rules" is what
+  // made the screen hard to reason about. The screen then grew a second door anyway -
+  // the broadcast fan-out - and ended up back in exactly the state that rewrite set
+  // out to leave. This is that correction, applied to the door the product is not
+  // being built to rather than to the one it is.
+  {
+    path: "offpage/Web2ArticleWizard.tsx",
+    status: "operator-removed",
+    unmountedBy: "the 2026-09-22 single-door pass (owner instruction)",
+    reason:
+      "Web 2.0 now has ONE door: 'Write once, publish everywhere' - one subject " +
+      "fanned out into a per-platform variant, with the whole fan-out and every " +
+      "exclusion shown before a drafting run is billed. That is the flow the product " +
+      "is being built to. The single-article wizard is the one-piece door and its own " +
+      "value is real - it is the only path where the approver reads the article before " +
+      "choosing where it goes - which is why it is parked rather than deleted.",
+    reEnableWhen:
+      "A one-article-at-a-time Web 2.0 flow is wanted again. Nothing needs repairing " +
+      "first: it was green when unmounted, and the publish paths it drives (API " +
+      "publish and the extension hand-off) are untouched and still used by the " +
+      "approval row on the Placements view.",
+  },
+
   // --- The Web 2.0 CAMPAIGN flow ---------------------------------------------
   // Unmounted 2026-09-12 on owner instruction, replaced by the single-article flow
   // (`Web2ArticleWizard`). KEPT, not deleted: the backend half is intact and proven -
@@ -157,33 +229,12 @@ export const PARKED: ParkedEntry[] = [
       "was green when unmounted and keeps its tests (DesignReplicator.test.tsx).",
   },
 
-  // --- The public free-audit funnel, retired 2026-09-17 --------------------
-  {
-    path: "free-audit/FreeAuditFlow.tsx",
-    status: "operator-removed",
-    unmountedBy: "the 2026-09-17 client instruction to stop offering a self-serve public audit",
-    reason:
-      "\"The user-facing free audit page - don't build it that way. In the audit " +
-      "module of the admin dashboard there should be a flow where we enter the " +
-      "client's website and details, and that same full report page appears with a " +
-      "public URL we can send on WhatsApp or Fiverr.\" An operator now runs the " +
-      "audit and publishes the link, so the anonymous self-serve path - the only " +
-      "unauthenticated route that could cause a real crawl - is gone with it.",
-    reEnableWhen:
-      "A self-serve lead magnet is wanted again. NOTE the backend half it drove " +
-      "(POST /public/audits and its four abuse controls) was removed too, so this " +
-      "needs that endpoint back before it can do anything.",
-  },
-  {
-    path: "free-audit/FreeAuditReport.tsx",
-    status: "operator-removed",
-    unmountedBy: "the 2026-09-17 client instruction to stop offering a self-serve public audit",
-    reason:
-      "The in-flow report screen of the retired funnel. The SHARED report page " +
-      "(/leads/<slug>, PublicAuditPage) is the surviving one and renders the same " +
-      "consulting report - this rendered the token-polled result inside the flow.",
-    reEnableWhen: "FreeAuditFlow returns; it has no other caller.",
-  },
+  // The public free-audit funnel's two components (FreeAuditFlow, FreeAuditReport)
+  // were PARKED here from 2026-09-17 and DELETED on 2026-09-19 on the owner's
+  // instruction to remove the free audit page. They are recoverable from git; the
+  // backend half they drove (POST /public/audits) had already been removed with the
+  // funnel, so neither could have run. The shared report page they are confused with
+  // - /leads/<slug>, PublicAuditPage - is live and untouched.
 
   // --- Phase-1 screen grammar: built ahead of the screens that mount them ----
   // The approved Screen & Hierarchy Specification (plan of 2026-08-27) builds the
@@ -320,7 +371,7 @@ export const PARKED: ParkedEntry[] = [
   // deliberately unmounted; the endpoints behind them are untouched.
   ...(
     [
-      ["charts/AuditVolumeChart.tsx", "Free Audit Volume", "The Free Audit Volume card was removed from the admin dashboard (QA 26). Free Audits themselves were verified working and keep their own module at /admin/leads."],
+      ["charts/AuditVolumeChart.tsx", "Free Audit Volume", "The Free Audit Volume card was removed from the admin dashboard (QA 26). It counts runs of the self-serve funnel, which was retired on 2026-09-17, and its /admin/leads module was removed on 2026-09-19 - so re-mounting it would chart a number that can no longer move."],
       ["overview/SpendSnapshot.tsx", "Platform Spend", "The Platform Spend / Cost Controls card was removed from the admin dashboard (QA 26). Spend still has its own module at /admin/cost, and the halt control there was verified working."],
       ["cost/CostLog.tsx", "Cost Log", "QA 11: the log showed $0.00 for work that did cost money, so it was removed rather than shown wrong. NOTE: the display was never the defect - the per-job cost attribution behind it is. Re-mount once a job's spend is recorded against it."],
       ["clients/MrrTreemap.tsx", "Revenue Treemap", "QA 16: not required on Client Info."],

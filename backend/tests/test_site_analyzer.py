@@ -6,6 +6,8 @@ install or a real browser.
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 
 from integrations.site_analyzer import (
@@ -140,3 +142,68 @@ def test_capture_result_as_dict_round_trips_shape() -> None:
     assert d["url"] == "https://example.com"
     assert d["viewports"][0]["viewport"] == "desktop"
     assert d["viewports"][0]["screenshot_b64"] == "Zm9v"
+
+class TestAMissingBrowserIsNotAFailedPage:
+    """`pip install .[automation]` without `playwright install chromium` is the common
+    half-done deploy, and it used to report every capture as "that site would not load" -
+    sending the operator to look at the CLIENT'S website for a problem on ours."""
+
+    def test_the_missing_binary_gets_its_own_reason(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from integrations.site_analyzer import (
+            DEGRADE_NO_BROWSER,
+            PlaywrightSiteAnalyzer,
+        )
+
+        class _FakeLaunchError(Exception):
+            pass
+
+        def _boom(*_a: Any, **_k: Any) -> Any:
+            raise _FakeLaunchError(
+                "BrowserType.launch: Executable doesn't exist at "
+                "/ms-playwright/chromium-1091/chrome-linux/chrome. "
+                "Looks like Playwright was just installed or updated. "
+                "Please run the following command to download new browsers: "
+                "playwright install"
+            )
+
+        import sys
+        import types
+
+        fake = types.ModuleType("playwright.sync_api")
+        fake.Error = _FakeLaunchError  # type: ignore[attr-defined]
+        fake.sync_playwright = _boom  # type: ignore[attr-defined]
+        pkg = types.ModuleType("playwright")
+        monkeypatch.setitem(sys.modules, "playwright", pkg)
+        monkeypatch.setitem(sys.modules, "playwright.sync_api", fake)
+
+        out = PlaywrightSiteAnalyzer().capture("https://example.com")
+        assert out.status == "degraded"
+        assert out.reason == DEGRADE_NO_BROWSER
+
+    def test_a_real_page_failure_still_reads_as_one(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from integrations.site_analyzer import (
+            DEGRADE_CAPTURE_FAILED,
+            PlaywrightSiteAnalyzer,
+        )
+
+        class _FakeLaunchError(Exception):
+            pass
+
+        def _boom(*_a: Any, **_k: Any) -> Any:
+            raise _FakeLaunchError("page.goto: net::ERR_NAME_NOT_RESOLVED at https://example.com")
+
+        import sys
+        import types
+
+        fake = types.ModuleType("playwright.sync_api")
+        fake.Error = _FakeLaunchError  # type: ignore[attr-defined]
+        fake.sync_playwright = _boom  # type: ignore[attr-defined]
+        monkeypatch.setitem(sys.modules, "playwright", types.ModuleType("playwright"))
+        monkeypatch.setitem(sys.modules, "playwright.sync_api", fake)
+
+        out = PlaywrightSiteAnalyzer().capture("https://example.com")
+        assert out.reason == DEGRADE_CAPTURE_FAILED

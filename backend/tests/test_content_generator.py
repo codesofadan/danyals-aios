@@ -563,8 +563,12 @@ def test_camera_suffix_enforces_no_faces_and_realistic_texture() -> None:
         "unretouched", "pores", "grain", "not airbrushed", "not a 3d render", "no plastic skin",
     ):
         assert phrase in suffix
-    # The infographic / text negatives are kept as cheap insurance on top of the scene lever.
-    for phrase in ("not an infographic", "no text", "no logos"):
+    # The infographic / text negatives are cheap insurance on top of the scene lever.
+    # "no legible text", NOT "no text": the ban was narrowed deliberately. Forbidding text
+    # outright also forbade the charts, dashboards and screens that make a business photo
+    # look like the subject, and the model answered with coffee cups and handshakes. What
+    # actually has to be absent is READABLE lettering, which is the giveaway.
+    for phrase in ("not an infographic", "no legible text", "no logos"):
         assert phrase in suffix
     # The suffix is topic-free by construction (no article subject leaks in).
     assert "roof repair" not in suffix

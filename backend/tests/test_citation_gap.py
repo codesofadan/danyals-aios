@@ -167,9 +167,15 @@ def test_web2_board_connected_missing_and_draft_only() -> None:
     assert "oauth_token" in wp.required_fields
     devto = statuses["dev.to"]
     assert devto.connected is False and "Missing" in devto.reason
+    # Medium moved from DRAFT-ONLY to UNSUPPORTED when the pipeline started refusing it
+    # outright (A12): it used to be accepted, PAID FOR as a draft, and then settled at
+    # `pending` forever. The board has to say the stronger thing, or it goes on inviting
+    # an operator to seal a credential that can never be used.
     medium = statuses["Medium"]
     assert medium.draft_only is True and medium.connected is False
-    assert "retired" in medium.reason and medium.external_note == ""
+    assert "Not supported" in medium.reason
+    assert "no usable publishing API" in medium.reason
+    assert medium.external_note == ""
     # a connected, live platform always carries the external caveat
     assert "external" in wp.external_note.lower()
 

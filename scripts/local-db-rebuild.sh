@@ -109,7 +109,17 @@ SQL
 # The sed strips trailing `# inline comments` that would otherwise land in a value.
 set -a
 # shellcheck disable=SC1090
-source <(grep -E '^[A-Z_]+=' .env | sed -E 's/[[:space:]]+#.*$//')
+#
+# QUOTE EVERY VALUE BEFORE SOURCING. `.env` holds unquoted values with spaces -
+# `SEED_OWNER_NAME=AIOS Owner` is the one that bit - and `source` on that line runs
+# `Owner` as a command, aborting the script AFTER the migrations had applied but
+# BEFORE the RLS gate and the owner seed. The failure looked like "Owner: command not
+# found", which names neither the file nor the variable, so it read as unrelated noise.
+# Wrapping each value in single quotes (and escaping any it contains) makes the whole
+# file safe to source regardless of what an operator pasted into it.
+source <(
+  grep -E '^[A-Z_0-9]+=' .env     | sed -E 's/[[:space:]]+#.*$//'     | sed -E "s/^([A-Z_0-9]+)=(.*)$/\1='\2'/"     | sed -E "s/^([A-Z_0-9]+)=''(.*)''$/\1='\2'/"
+)
 set +a
 
 log "running the RLS coverage gate"

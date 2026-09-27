@@ -33,6 +33,7 @@ machine-branchable ``reason`` - never an unhandled exception bubbling into the w
 from __future__ import annotations
 
 import base64
+import os
 from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol, runtime_checkable
 
@@ -52,6 +53,21 @@ _SETTLE_MS = 350  # a short pause after a viewport resize so CSS transitions/ref
 DEGRADE_NO_PLAYWRIGHT = "playwright_unconfigured"
 DEGRADE_PRIVATE_HOST = "private_host_blocked"
 DEGRADE_CAPTURE_FAILED = "capture_failed"
+#: THE PACKAGE IS INSTALLED AND THE BROWSER IS NOT. A distinct reason from both of the
+#: above, because it has a distinct one-line fix and it used to be indistinguishable from
+#: "that website would not load": `pip install .[automation]` brings the Python package,
+#: `playwright install chromium` brings the ~150MB binary, and a deploy that ran only the
+#: first reported every capture as a failed page. Worse, the binary is looked up under
+#: PLAYWRIGHT_BROWSERS_PATH, so a browser installed as one user is invisible to a worker
+#: running as another - the same symptom with nothing missing from the image at all.
+DEGRADE_NO_BROWSER = "playwright_browser_missing"
+
+#: The substrings Playwright's own launch error uses when the binary is not where it looks.
+_MISSING_BROWSER_MARKERS = (
+    "executable doesn't exist",
+    "playwright install",
+    "browsertype.launch",
+)
 
 
 # --------------------------------------------------------------------------- #
@@ -408,7 +424,22 @@ class PlaywrightSiteAnalyzer:
                     )
                 finally:
                     browser.close()
-        except PlaywrightError:
+        except PlaywrightError as exc:
+            # A MISSING BROWSER IS NOT A FAILED PAGE, and reporting it as one sent
+            # operators to look at the client's website. The message is Playwright's own;
+            # the browsers path is logged beside it because "installed, wrong path" and
+            # "not installed" look identical from here and have different fixes.
+            message = str(exc)[:400].lower()
+            if any(marker in message for marker in _MISSING_BROWSER_MARKERS):
+                logger.warning(
+                    "site_analyzer_browser_missing",
+                    url=url,
+                    browsers_path=os.environ.get("PLAYWRIGHT_BROWSERS_PATH", "(default)"),
+                    fix=_INSTALL_HINT,
+                )
+                return CaptureResult(
+                    status="degraded", capture=None, reason=DEGRADE_NO_BROWSER
+                )
             logger.info("site_analyzer_capture_failed", url=url)
             return CaptureResult(status="degraded", capture=None, reason=DEGRADE_CAPTURE_FAILED)
         except Exception:  # transport/timeout/anything unforeseen: degrade, never crash the worker

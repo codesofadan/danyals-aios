@@ -56,7 +56,7 @@ WEB = os.environ.get("WEB", "http://127.0.0.1:3000")
 ROUTES = [
     "/admin", "/admin/clients", "/admin/audit", "/admin/leads", "/admin/content",
     "/admin/content/new", "/admin/wordpress", "/admin/web2", "/admin/citations",
-    "/admin/citations/queue", "/admin/policy-radar", "/admin/tasks",
+    "/admin/policy-radar", "/admin/tasks",
     "/admin/milestones", "/admin/reports", "/admin/team", "/admin/operations",
     "/admin/cost", "/admin/vault", "/admin/settings",
 ]

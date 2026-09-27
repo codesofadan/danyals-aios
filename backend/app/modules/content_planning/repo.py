@@ -32,6 +32,21 @@ from app.services.brand_kit import BRAND_ASSET_KINDS
 _Row = dict[str, Any]
 
 
+def cluster_key_for(job: _Row) -> str:
+    """The dossier cluster key for one content job row.
+
+    THE ONE PLACE THIS IS DERIVED, because two places would silently disagree and the
+    symptom would be a questionnaire answering the wrong page. Mirrors
+    ``workers.tasks.content_pipeline._context_for`` exactly: the operator's chosen
+    keyword, falling back to the topic, lowercased - which is what ``run_sme`` keys the
+    dossier on when the caller passes no explicit cluster.
+    """
+    pack = job.get("source_pack") or {}
+    if not isinstance(pack, dict):
+        pack = {}
+    return str(pack.get("primary_keyword") or job.get("topic") or "").strip().lower()
+
+
 def _engagement(row: _Row) -> Engagement:
     return Engagement(
         id=str(row["id"]), shape=row["shape"], status=row["status"],
@@ -453,6 +468,7 @@ class ContentPlanningStore:
         blueprint: list[dict[str, Any]],
         raw_measurements: dict[str, Any] | None = None,
         approved_by: str | None = None,
+        source_page_type: str = "",
     ) -> str:
         """Store a new kit VERSION and make it the active one.
 
@@ -464,7 +480,16 @@ class ContentPlanningStore:
         means the intermediate state - two active kits - is not merely untidy, it is
         rejected. Doing it in two statements outside a transaction would leave a client
         with no active kit if the insert failed.
+
+        PER-PAGE-TYPE BLUEPRINTS MERGE FORWARD (0154). A capture measures ONE page, so
+        it can only be evidence about that page's type. Carrying the previous version's
+        map forward and overlaying this capture's type onto it is what lets an operator
+        capture the client's homepage, then their services page, and end with a kit that
+        knows the real structure of both - instead of each capture discarding what the
+        last one learned. This capture's own type always wins for its own key, because
+        it is the newer measurement of that type.
         """
+        page_type = str(source_page_type or "").strip().lower().replace("-", "_")
         with privileged_connection() as cur:
             cur.execute(
                 "select coalesce(max(version), 0) + 1 as next "
@@ -473,6 +498,18 @@ class ContentPlanningStore:
             )
             row = cur.fetchone()
             version = int((row or {}).get("next") or 1)
+
+            # The map the previous ACTIVE kit held, read inside the same transaction so
+            # a concurrent capture cannot interleave between the read and the insert.
+            cur.execute(
+                "select blueprints from public.brand_kits "
+                "where client_id = %s and active limit 1",
+                (client_id,),
+            )
+            prior = cur.fetchone() or {}
+            blueprints: dict[str, Any] = dict(prior.get("blueprints") or {})
+            if page_type and blueprint:
+                blueprints[page_type] = blueprint
 
             cur.execute(
                 "update public.brand_kits set active = false "
@@ -487,14 +524,15 @@ class ContentPlanningStore:
             cur.execute(
                 """insert into public.brand_kits
                      (client_id, source_url, version, palette, typography, spacing,
-                      components, blueprint, raw_measurements, active,
-                      approved_at, approved_by)
-                   values (%s, %s, %s, %s, %s, %s, %s, %s, %s, true,
+                      components, blueprint, blueprints, source_page_type,
+                      raw_measurements, active, approved_at, approved_by)
+                   values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, true,
                            case when %s::uuid is null then null else now() end, %s)
                    returning id""",
                 (
                     client_id, source_url, version, Jsonb(palette), Jsonb(typography),
                     Jsonb(spacing), Jsonb(components), Jsonb(blueprint),
+                    Jsonb(blueprints), page_type,
                     Jsonb(raw_measurements or {}), approved_by, approved_by,
                 ),
             )
@@ -661,22 +699,37 @@ class ContentPlanningRepo:
         Returns None when the job has no engagement yet - which is the normal
         state before the job has run once, not an error. The caller reports
         "nothing to answer yet" rather than 404ing a job that plainly exists.
+
+        THE CLUSTER MATCH IS LOAD-BEARING. Dossiers are per CLUSTER (0087), and the
+        SME stage keys them on the job's own target keyword
+        (``source_pack.primary_keyword`` falling back to ``topic``, lowercased - see
+        ``workers.tasks.content_pipeline._context_for``). This used to take
+        ``order by created_at limit 1``, i.e. the engagement's FIRST dossier, so from
+        the second cluster onward an operator opening a held page was shown - and
+        answered - the questions belonging to a different page, and the page they
+        were looking at stayed held with no explanation.
+
+        The fallback to the earliest dossier is kept deliberately: rows written
+        before the cluster key was derivable (and any job whose keyword has since
+        been edited) still resolve to something answerable rather than to nothing.
         """
         with rls_connection(self._user_id) as cur:
-            cur.execute(
-                "select id, code, engagement_id, topic, client_name, status, stage "
-                "from public.content_jobs where code = %s limit 1",
-                (code,),
-            )
-            job = cur.fetchone()
+            job = self._job_row(cur, code)
             if job is None or not job.get("engagement_id"):
                 return None
             cur.execute(
                 "select * from public.sme_dossiers where engagement_id = %s "
-                "order by created_at limit 1",
-                (job["engagement_id"],),
+                "  and cluster_key = %s limit 1",
+                (job["engagement_id"], cluster_key_for(job)),
             )
             dossier = cur.fetchone()
+            if dossier is None:
+                cur.execute(
+                    "select * from public.sme_dossiers where engagement_id = %s "
+                    "order by created_at limit 1",
+                    (job["engagement_id"],),
+                )
+                dossier = cur.fetchone()
             if dossier is None:
                 return None
             cur.execute(
@@ -685,8 +738,128 @@ class ContentPlanningRepo:
             )
             return dossier, list(cur.fetchall())
 
-    def answer_slots(self, dossier_id: str, answers: list[dict[str, Any]]) -> str:
-        """Record operator answers and recompute the dossier status, atomically.
+    @staticmethod
+    def _job_row(cur: Any, code: str) -> _Row | None:
+        """The job columns every Experience read needs, including its grounding.
+
+        ``source_pack`` is here because the questionnaire's OPTIONS are derived from
+        it (``app.services.experience_options``): the proof points, testimonials and
+        data the operator supplied are the client's own evidence, and offering them
+        back is what turns an interview into a pick list.
+        """
+        cur.execute(
+            "select id, code, client_id, engagement_id, topic, page_type, client_name, "
+            "  status, stage, source_pack "
+            "from public.content_jobs where code = %s limit 1",
+            (code,),
+        )
+        row: _Row | None = cur.fetchone()
+        return row
+
+    def job_for_experience(self, code: str) -> _Row | None:
+        """The job behind an Experience read, RLS-scoped (None when not visible)."""
+        with rls_connection(self._user_id) as cur:
+            return self._job_row(cur, code)
+
+    def prior_answers_for_client(
+        self, client_id: str | None, *, exclude_dossier_id: str | None = None
+    ) -> list[_Row]:
+        """Answers this client already attested, for OTHER clusters.
+
+        The strongest option the questionnaire can offer, because the client wrote it
+        themselves about themselves for the same purpose. Scoped to the client through
+        the engagement join, so one client's attestations can never be offered to
+        another - and it runs under RLS, so the database enforces that rather than
+        this method remembering to.
+
+        Answered slots only, newest first, and the dossier currently being answered is
+        excluded so the form never offers a value back to the slot it came from.
+        """
+        if not client_id:
+            return []
+        with rls_connection(self._user_id) as cur:
+            cur.execute(
+                """select s.slot_key, s.answer, s.answered_at, d.cluster_key
+                   from public.sme_slots s
+                   join public.sme_dossiers d on d.id = s.dossier_id
+                   join public.content_engagements e on e.id = d.engagement_id
+                   where e.client_id = %s and s.answer <> ''
+                     and (%s::uuid is null or s.dossier_id <> %s::uuid)
+                   order by s.answered_at desc nulls last, s.updated_at desc
+                   limit 200""",
+                (client_id, exclude_dossier_id, exclude_dossier_id),
+            )
+            return list(cur.fetchall())
+
+    def client_facts(self, client_id: str | None) -> _Row | None:
+        """The client's own business record, as evidence for the questionnaire's options.
+
+        Joins the client to its business profile because the two halves of the same
+        record live in different tables: the trading history and primary contact on
+        ``clients`` (0003), the location and the blurb on
+        ``client_business_profiles`` (0051/0060). Both were collected from the client, so
+        both are legitimate things to offer back for confirmation.
+
+        EVERY COLUMN NAMED HERE EXISTS, which is not how this shipped: the first version
+        also asked for ``p.tagline`` and ``p.year_founded``, neither of which is in
+        ``client_business_profiles``. The caller catches the failure so a broken lookup
+        cannot hide the questions - so the whole RECORD-derived half of the option list
+        was quietly absent instead, and the screen looked like a client with no record
+        rather than a query that could not run. The trading year lives on
+        ``clients.since_year`` and is read above.
+
+        LEFT JOIN, not INNER: a client with no business profile yet still has a name, an
+        industry and a contact, and a shorter option list is the correct outcome rather
+        than an empty one.
+        """
+        if not client_id:
+            return None
+        with rls_connection(self._user_id) as cur:
+            cur.execute(
+                """select c.name, c.industry, c.since_year, c.contact_name, c.contact_role,
+                          p.city, p.region, p.market, p.description, p.website_url,
+                          p.business_name, p.primary_category
+                   from public.clients c
+                   left join public.client_business_profiles p on p.client_id = c.id
+                   where c.id = %s limit 1""",
+                (client_id,),
+            )
+            return cur.fetchone()
+
+    def dossiers_for_client(self, client_id: str) -> list[_Row]:
+        """The client's Experience library: every cluster, with how much is answered.
+
+        What it is for: an operator about to build a batch wants to know which clusters
+        are already covered before asking the client anything. Without this the only way
+        to find out was to open every held job one at a time.
+        """
+        with rls_connection(self._user_id) as cur:
+            cur.execute(
+                """select d.id, d.cluster_key, d.status, d.updated_at,
+                          count(s.id) as slots,
+                          count(s.id) filter (
+                            where s.answer <> '' or s.artifact_url <> ''
+                          ) as answered,
+                          max(s.answered_at) as last_answered_at
+                   from public.sme_dossiers d
+                   join public.content_engagements e on e.id = d.engagement_id
+                   left join public.sme_slots s on s.dossier_id = d.id
+                   where e.client_id = %s
+                   group by d.id, d.cluster_key, d.status, d.updated_at
+                   order by d.updated_at desc""",
+                (client_id,),
+            )
+            return list(cur.fetchall())
+
+    def answer_slots(
+        self,
+        dossier_id: str,
+        answers: list[dict[str, Any]],
+        *,
+        source: str = "operator",
+        actor_id: str | None = None,
+    ) -> str:
+        """Record answers and recompute the dossier status, atomically.
 
         UPDATE-only, never insert: the slots are created by the SME stage, which
         owns which proof categories this page type requires. Letting a client body
@@ -696,16 +869,35 @@ class ContentPlanningRepo:
         Status is recomputed in the same transaction because it is what the halt
         reads - a status written a moment later is a window where a complete
         dossier still blocks drafting.
+
+        ``source`` / ``actor_id`` / ``answer_evidence`` record the ATTESTATION (0155).
+        The questionnaire now offers options derived from the client's own evidence, so
+        "who said this, and on the strength of what" is the difference between a
+        client-confirmed fact and a plausible-looking suggestion - and only the first
+        may be stated in a published page. ``answered_at`` is only stamped for an answer
+        that is actually present: clearing a slot must not leave it looking attested.
         """
+        allowed_sources = {"client", "operator", "transcript", "client_site"}
+        src = source if source in allowed_sources else "operator"
         with rls_connection(self._user_id) as cur:
             for answer in answers:
+                text = str(answer.get("answer") or "")
+                artifact = str(answer.get("artifact_url") or "")
+                present = bool(text.strip() or artifact.strip())
                 cur.execute(
                     "update public.sme_slots set answer = %s, artifact_url = %s, "
-                    "  source = 'operator' "
+                    "  source = %s, answer_evidence = %s, "
+                    "  answered_by = case when %s then %s::uuid else null end, "
+                    "  answered_at = case when %s then now() else null end "
                     "where dossier_id = %s and slot_key = %s",
                     (
-                        str(answer.get("answer") or ""),
-                        str(answer.get("artifact_url") or ""),
+                        text,
+                        artifact,
+                        src,
+                        str(answer.get("answer_evidence") or "") if present else "",
+                        present,
+                        actor_id,
+                        present,
                         dossier_id,
                         str(answer.get("slot_key") or ""),
                     ),

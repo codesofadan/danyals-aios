@@ -158,7 +158,11 @@ def test_agent_fanout_mirrors_build_argv(depth: str) -> None:
         # audit-type picker promised per-dimension scoping the engine cannot do -
         # the deterministic crawl always runs in full - so these flags are the
         # only scoping that was ever real.
-        ("free", {"--no-psi", "--no-serper", "--no-places", "--no-citations"}),
+        # PSI is ON at free depth (2026-09-26). PageSpeed Insights is free - quota-bounded,
+        # not billed - so it is not one of the paid integrations the free tier keeps out, and
+        # clearing it cost every free audit its Core Web Vitals for no spend protection. The
+        # money-spending three stay off, which is what keeps the derived $0 true.
+        ("free", {"--psi", "--no-serper", "--no-places", "--no-citations"}),
         ("standard", {"--psi", "--serper", "--no-places", "--no-citations"}),
         ("deep", {"--psi", "--serper", "--places", "--citations"}),
     ],

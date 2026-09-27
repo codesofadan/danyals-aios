@@ -89,7 +89,12 @@ def test_a_pass_over_a_partial_crawl_is_not_sold_as_working(pdf):
     import json
 
     for findings in RUNS:
-        rows = json.loads(findings.read_text())
+        # encoding="utf-8" EXPLICITLY. The engine writes findings.json as UTF-8, and
+        # real audit data carries curly quotes in page titles - so an unqualified
+        # read_text() picks up the platform default and dies with a cp1252
+        # UnicodeDecodeError on Windows. The test then fails for a reason that has
+        # nothing to do with what it is checking.
+        rows = json.loads(findings.read_text(encoding="utf-8"))
         rows = rows if isinstance(rows, list) else rows.get("findings", [])
         partial_names = set()
         for r in rows:
@@ -126,7 +131,7 @@ def _real_evidence_blobs(limit: int = 400) -> list[dict]:
     out: list[dict] = []
     for findings in RUNS:
         try:
-            rows = json.loads(findings.read_text())
+            rows = json.loads(findings.read_text(encoding="utf-8"))
         except (ValueError, OSError):  # pragma: no cover
             continue
         rows = rows if isinstance(rows, list) else rows.get("findings", [])
@@ -203,7 +208,7 @@ def test_no_analyzer_produces_a_remediation_containing_a_python_repr():
 
     fixtures = ROOT / "tests" / "fixtures"
     pages = [
-        html_parser.parse(f.read_text(), "https://example.com/page")
+        html_parser.parse(f.read_text(encoding="utf-8"), "https://example.com/page")
         for f in sorted(fixtures.glob("*.html"))
     ]
     assert pages, "no HTML fixtures to run the analyzers over"

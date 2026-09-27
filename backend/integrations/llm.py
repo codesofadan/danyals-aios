@@ -159,7 +159,14 @@ class SystemSummarizer(Protocol):
 # reach costs nothing. Sizing it to the tightest model that happens to be configured
 # today would re-break the moment the tier changes — 8192 clears the slowest thinker
 # measured (glm-5.3 at 5313) with real headroom, for free.
-_REASONING_TOKEN_FLOOR = 8192
+# PUBLIC because it is not this module's private business: `app.services.site_design`
+# owns a SECOND Anthropic seam (a per-call system prompt + a vision image block), and it
+# was starved by exactly this - a 4096 ceiling on a thinking-by-default model returned
+# `stop_reason=max_tokens` with the design JSON truncated mid-object, which the caller
+# could only report as `analysis_failed`. One constant, both seams.
+REASONING_TOKEN_FLOOR = 8192
+#: Back-compat alias for this module's own historical references.
+_REASONING_TOKEN_FLOOR = REASONING_TOKEN_FLOOR
 
 
 class AnthropicSummarizer:

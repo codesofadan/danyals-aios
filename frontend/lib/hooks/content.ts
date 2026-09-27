@@ -231,6 +231,22 @@ export type SiteDesignInput = {
    *  are built to it. Omitted, the analysis is a one-off preview that dies with the
    *  request — which is how every capture behaved before 2026-09-17. */
   clientId?: string;
+  /** WHAT KIND of page this URL is — "homepage" | "service" | "local" | "blog" |
+   *  "faq" | "service_area".
+   *
+   *  A capture measures ONE page, so its section SEQUENCE is evidence about that
+   *  page's type and no other: a homepage's hero / trust-bar / services-grid order is
+   *  a correct homepage and a wrong blog post. The kit stores the sequence under this
+   *  key and generation applies it only to pages of the same type, falling back to the
+   *  audited template for the rest. Capturing a second page type ADDS to the kit
+   *  rather than replacing it, so an operator can capture the homepage and then the
+   *  services page and have both used correctly.
+   *
+   *  Omitted, the server infers it from the URL path (a bare domain → "homepage") and
+   *  records nothing when it cannot tell — which is safe, not lossy: an unkeyed
+   *  sequence is simply never applied as per-type evidence. Palette, typography and
+   *  components are NOT page-type scoped and always apply site-wide. */
+  pageType?: string;
 };
 export type SiteDesignResult = {
   status: "ok" | "degraded";
@@ -329,10 +345,54 @@ export type QaScorecard = {
   blocked_by: string[];
   provisional: boolean;
   notes: string[];
+  /** Dimensions the scorer could NOT measure. They appear in `dimensions` as 0 and are
+   *  excluded from `weighted_total`, the per-dimension floor and `blocked_by` — so a 0
+   *  listed here means "not measured", never "measured and terrible". Render it as such;
+   *  treating it as a score is the defect this field exists to prevent. Optional for
+   *  back-compat with a job scored before the field existed. */
+  unmeasured?: string[];
 };
 export type ContentQa = { id: string; qa: QaScorecard | null };
 export function useContentQa(code: string | null) {
   return useContentColumn<ContentQa>(code, "qa");
+}
+
+// --- The review signal: NAMED PROBLEMS, not a score ---------------------------
+//
+// The weighted total is no longer shown to a reviewer (operator's decision,
+// 2026-09-26). Its own module declares the threshold and weights uncalibrated against
+// ranking outcomes or a human grade, so a number that reads like a verdict cannot
+// support one - a reviewer who trusts it is misled, and one who learns to ignore it has
+// a screen full of noise.
+//
+// What survives is the half that was never provisional: the deterministic detections.
+// "A claim with no source" is not a matter of calibration. The scorecard is still
+// computed, still stored and still readable at `/content/jobs/{code}/qa` for
+// calibration work; this endpoint is what the REVIEW surfaces render.
+export type ReviewFlag = {
+  key: string;
+  title: string;
+  detail: string;
+  /** "problem" for a doctrine floor, "note" for everything else. */
+  kind: string;
+};
+
+export type ReviewFlags = {
+  id: string;
+  flags: ReviewFlag[];
+  problems: number;
+  notes: number;
+};
+
+export const reviewFlagsKey = (code: string) =>
+  ["content", "review-flags", code] as const;
+
+export function useReviewFlags(code: string | null) {
+  return useQuery({
+    queryKey: reviewFlagsKey(String(code)),
+    queryFn: () => api.get<ReviewFlags>(`/content/jobs/${code}/review-flags`),
+    enabled: Boolean(code),
+  });
 }
 
 // (f) WORDPRESS push: the permalink + wp-admin edit link captured when an approved
@@ -417,12 +477,36 @@ export function useExperienceQuestions(pageType: string | null) {
   });
 }
 
+// One pickable answer, and the words that say where it came from.
+//
+// Every option is DERIVED from evidence this client already gave us - a prior answer for
+// another cluster, the proof points supplied for this build, their business record, their
+// own site copy - and nothing here is generated. That is what makes a dropdown safe on
+// this particular question: picking is the client CONFIRMING their own fact, where a list
+// of plausible-sounding sentences would be the fabrication the whole gate exists to stop.
+//
+// `kind` orders and colours them: prior | supplied | record | site are extractions,
+// `artifact` means "I will attach the proof", `decline` is an explicit non-claim ("we do
+// not have this - do not reference it"), which satisfies the gate honestly.
+export type ExperienceOption = {
+  value: string;
+  evidence: string;
+  kind: string;
+};
+
 export type ExperienceSlot = {
   slotKey: string;
   question: string;
   answer: string;
   artifactUrl: string;
   answered: boolean;
+  /** Who attested it: client | operator | transcript | client_site. */
+  source?: string;
+  /** Where the picked option came from, for the person auditing it later. */
+  answerEvidence?: string;
+  /** When it was attested, already formatted ("12 Sep 2026"). */
+  answeredOn?: string;
+  options?: ExperienceOption[];
 };
 
 export type ExperienceDossier = {
@@ -446,7 +530,13 @@ export function useExperience(code: string | null) {
   });
 }
 
-export type ExperienceAnswer = { slot_key: string; answer?: string; artifact_url?: string };
+export type ExperienceAnswer = {
+  slot_key: string;
+  answer?: string;
+  artifact_url?: string;
+  /** The provenance of the option that was picked; stored beside the answer. */
+  answer_evidence?: string;
+};
 
 export function useAnswerExperience(code: string) {
   const qc = useQueryClient();
@@ -457,6 +547,102 @@ export function useAnswerExperience(code: string) {
       qc.setQueryData(experienceKey(code), fresh);
       // A completed dossier resumes the page, so the job row changes too.
       void qc.invalidateQueries({ queryKey: CONTENT_JOBS_KEY });
+    },
+  });
+}
+
+// --- BATCHES (0157): a bulk build as ONE thing --------------------------------
+//
+// A fan-out creates independent jobs - correctly, since that is what lets thirty pages run
+// in parallel and one failure not take the rest down. What was missing is that nothing
+// recorded they belonged together: no progress view, no spend bound for the run as a whole,
+// and no way to pick up the pages a budget hold stranded.
+//
+// `held` is derived server-side from what the worker actually writes when it degrades (a
+// `drafting` job whose stage begins "Held"), not from a second status column that could
+// disagree with it.
+export type ContentBatch = {
+  id: string;
+  label: string;
+  client: string;
+  contentType: string;
+  /** The USD bound for the whole run, or null for unbounded. */
+  costCeiling: number | null;
+  spent: number;
+  jobs: number;
+  done: number;
+  inReview: number;
+  running: number;
+  held: number;
+  stopped: number;
+  createdAt: string;
+};
+
+export type ContentBatchJob = {
+  code: string;
+  topic: string;
+  pageType: string;
+  status: string;
+  stage: string;
+  cost: number;
+  words: number;
+  held: boolean;
+};
+
+export type ContentBatchDetail = {
+  id: string;
+  label: string;
+  client: string;
+  contentType: string;
+  costCeiling: number | null;
+  spent: number;
+  jobs: ContentBatchJob[];
+};
+
+export const CONTENT_BATCHES_KEY = ["content", "batches"] as const;
+export const contentBatchKey = (id: string) => ["content", "batch", id] as const;
+
+export function useContentBatches() {
+  return useQuery({
+    queryKey: CONTENT_BATCHES_KEY,
+    queryFn: () => api.get<ContentBatch[]>("/content/batches"),
+  });
+}
+
+export function useContentBatch(id: string | null) {
+  return useQuery({
+    queryKey: contentBatchKey(String(id)),
+    queryFn: () => api.get<ContentBatchDetail>(`/content/batches/${id}`),
+    enabled: Boolean(id),
+  });
+}
+
+/** Re-queue every HELD page in a batch. Reports what it skipped and why. */
+export function useResumeBatch(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () =>
+      api.post<{ resumed: string[]; skipped: string[]; reason: string }>(
+        `/content/batches/${id}/resume`,
+        {},
+      ),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: contentBatchKey(id) });
+      void qc.invalidateQueries({ queryKey: CONTENT_BATCHES_KEY });
+      void qc.invalidateQueries({ queryKey: CONTENT_JOBS_KEY });
+    },
+  });
+}
+
+/** Raise (or clear) a batch's spend ceiling - the usual way to release a held batch. */
+export function useUpdateBatch(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { label?: string; costCeiling?: number; clearCeiling?: boolean }) =>
+      api.patch<ContentBatch>(`/content/batches/${id}`, body),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: contentBatchKey(id) });
+      void qc.invalidateQueries({ queryKey: CONTENT_BATCHES_KEY });
     },
   });
 }

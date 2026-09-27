@@ -1,8 +1,15 @@
-"""The PUBLIC free-audit funnel - the platform's ONLY unauthenticated routes (P6C).
+"""The PUBLIC read routes - the platform's ONLY unauthenticated surface (P6C).
 
-A landing-page visitor (no login) requests ONE free audit per email; the result
-is later fetched by an opaque, unguessable ``report_token`` and shown with a
-Fiverr upsell link. Security posture (read before touching this file):
+WHAT THIS IS NOW. The funnel that CREATED these reports is gone: ``POST /public/audits``
+was deleted on 2026-09-18 with the self-serve landing page, and the operator's 2026-09-26
+decision keeps it that way - a staff member runs the audit and shares the link. What
+remains here is READ-ONLY, and it is load-bearing for two reasons: every free-audit link
+already sent out resolves through these routes, and the readable ``/pages/<brand>`` route
+is how an operator shares ANY completed report today.
+
+A visitor with a link (no login) fetches a report by an opaque, unguessable
+``report_token`` or by its published slug, and sees it with a Fiverr upsell link. Security
+posture (read before touching this file):
 
 * UNAUTHENTICATED yet TENANT-ISOLATED. These routes carry NO ``CurrentUser``
   dependency. They touch exactly one table - ``public.public_audits`` - which has
@@ -56,6 +63,7 @@ from app.services.audit_artifacts import (
     local_store_from_settings,
 )
 from app.services.content_images import (
+    IMAGE_MEDIA_TYPES,
     LocalContentImageStore,
     content_image_store_from_settings,
 )
@@ -399,18 +407,23 @@ async def serve_content_image(
 ) -> FileResponse:
     """Serve a generated CONTENT IMAGE by its content-hash filename (read-only).
 
-    UNAUTHENTICATED by design: these PNGs are embedded as ``<img>`` in published
+    UNAUTHENTICATED by design: these images are embedded as ``<img>`` in published
     WordPress pages / draft previews and are fetched by a browser with no bearer
     token. The filename is a sha256 content hash and the store resolves it
     traversal-safe (``..``/absolute refused), so a crafted name can never read an
     arbitrary file. A missing store or file is a clean 404, never a crash.
+
+    The media type comes from the stored suffix, which the store took from the bytes
+    themselves. It used to be hardcoded to image/png - correct only while the provider
+    happened to return PNG, and a silent mis-serve of every WebP the moment it did not.
     """
     if store is None:
         raise _ARTIFACT_NOT_FOUND
     path = await asyncio.to_thread(store.resolve, name)
     if path is None:
         raise _ARTIFACT_NOT_FOUND
-    return FileResponse(path, media_type="image/png", headers=_IMAGE_CACHE_HEADERS)
+    media_type = IMAGE_MEDIA_TYPES.get(path.suffix.lower(), "application/octet-stream")
+    return FileResponse(path, media_type=media_type, headers=_IMAGE_CACHE_HEADERS)
 
 
 # --------------------------------------------------------------------------- #
@@ -434,9 +447,25 @@ _PAGE_NOT_FOUND = HTTPException(
 _PAGE_SLUG_RE = re.compile(r"^[a-z0-9]([a-z0-9-]{0,78}[a-z0-9])?$")
 
 
+class PublicFinding(BaseModel):
+    """One headline problem, in words a business owner reads. No internal ids."""
+
+    title: str
+    severity: str
+    pages: int
+
+
 class PublicPage(BaseModel):
     """The curated public page payload. Same withholding rules as PublicReport:
-    no internal id, no email, no stored error, no artifact path."""
+    no internal id, no email, no stored error, no artifact path.
+
+    ``top_findings`` and ``not_checked`` were added because the shared page is the one
+    artifact that gets forwarded, and it used to be a score plus an embedded report. A
+    reader who does not open the report learned nothing they could act on, and - worse -
+    a FREE audit's silence on off-page and local looked exactly like a clean bill of
+    health. The page now says both halves out loud: the worst things we found, and what
+    this depth did not look at.
+    """
 
     slug: str
     kind: str
@@ -449,6 +478,13 @@ class PublicPage(BaseModel):
     has_report: bool
     when: str | None
     fiverr_url: str
+    #: The worst handful, most severe first. Empty when the run stored no findings.
+    top_findings: list[PublicFinding] = []
+    #: What this run did NOT measure, each as a sentence. NOT the same as "clean".
+    not_checked: list[str] = []
+    #: Set when the crawl itself was thin or refused, so the score is read with that in
+    #: mind rather than as a verdict on the site.
+    crawl_note: str = ""
 
 
 def _resolve_page(slug: str) -> dict[str, Any] | None:
@@ -461,8 +497,14 @@ def _resolve_page(slug: str) -> dict[str, Any] | None:
     """
     with privileged_connection() as cur:
         cur.execute(
+            # EXPIRY IS PART OF THE RESOLVE, not a check the caller can forget (0161). An
+            # expired page fails the same way an unpublished one does - no row, same 404,
+            # same body - because a distinct "expired" answer would confirm to a stranger
+            # that a report for that brand exists, which is what the random slug suffix on
+            # a paid page exists to prevent.
             "select kind, public_audit_id, audit_id from public.public_audit_pages"
-            " where slug = %s and published",
+            " where slug = %s and published"
+            "   and (expires_at is null or expires_at > now())",
             (slug,),
         )
         page = cur.fetchone()
@@ -516,6 +558,131 @@ def _brand_from_url(url: str) -> str:
     return re.sub(r"-{2,}", "-", host).strip("-")
 
 
+#: How many problems a public page names. Five, because the page is a summary an owner
+#: skims - the full list is in the report the page embeds, and a page that prints sixty
+#: findings is a list nobody reads rather than a summary anybody acts on.
+_PUBLIC_FINDING_LIMIT = 5
+
+#: Severity order for "the worst first". `info` is deliberately excluded from the public
+#: summary: it is not a problem, and listing it beside a critical flattens both.
+_PUBLIC_SEVERITY_RANK: dict[str, int] = {"critical": 0, "major": 1, "minor": 2}
+
+
+def _public_highlights(
+    audit_id: str,
+) -> tuple[list[PublicFinding], list[str], str, int | None]:
+    """The worst findings, what was not measured, the crawl caveat, and THE score.
+
+    THE SCORE IS RETURNED FROM HERE FOR ONE REASON: this page renders a number in its
+    header AND embeds the consulting report, and the two used to disagree in front of the
+    client - 59 at the top, 74.8 inside the document below it. They are two different
+    scorers. `audits.score` is the engine's own `scores.overall`, which folds a dimension
+    that never ran in as a zero; the site rollup is the coverage-aware score this platform
+    computes deliberately (null is not zero - it is "we did not look"), and it is what the
+    report prints. A shared page that contradicts its own attachment is not a page anyone
+    can send to a client, so the public payload uses the rollup where one exists and falls
+    back to the stored score where it does not.
+
+    The OPERATOR-facing audit row is deliberately left alone: it is the historical record
+    of what the engine reported for that run.
+
+    PRIVILEGED BUT PINNED TO ONE AUDIT, exactly like `_resolve_page` above: the route is
+    unauthenticated, so the read is filtered by the primary key the slug already resolved
+    and no tenant table is reachable from here.
+
+    WHAT IS WITHHELD, and why each one:
+      * check ids, fingerprints, evidence, remediation - the deliverable is what the
+        client is buying; this page is the invitation, not the audit.
+      * `info` findings - not problems.
+      * a dimension the run DID measure and found clean says nothing here, because "we
+        checked and it was fine" is the report's job to say, not the summary's.
+
+    Best-effort: a failure returns empty lists and no score override, so a page that cannot
+    summarise itself still renders exactly what it always did.
+    """
+    findings: list[PublicFinding] = []
+    not_checked: list[str] = []
+    crawl_note = ""
+    site_score: int | None = None
+    try:
+        with privileged_connection() as cur:
+            cur.execute(
+                """select check_name, severity, pages_affected, instance_count
+                   from public.audit_findings
+                   -- scope_type 'site' IS the cause altitude: `audit_ingest` writes every
+                   -- cause-level row with that scope (the site is the thing the cause is
+                   -- about). Filtering for 'cause' returned zero rows on a run with
+                   -- sixty-one findings, and an empty summary reads as "nothing found".
+                   where audit_id = %s::uuid and scope_type = 'site'
+                     and severity in ('critical', 'major', 'minor')
+                     and (status is null or status <> 'closed')
+                   order by case severity when 'critical' then 0 when 'major' then 1 else 2 end,
+                            pages_affected desc nulls last
+                   limit %s""",
+                (audit_id, _PUBLIC_FINDING_LIMIT),
+            )
+            for row in cur.fetchall():
+                findings.append(
+                    PublicFinding(
+                        title=str(row.get("check_name") or "").strip() or "An issue we found",
+                        severity=str(row.get("severity") or ""),
+                        pages=int(row.get("pages_affected") or row.get("instance_count") or 0),
+                    )
+                )
+            cur.execute(
+                """select label, key, not_measured_reason
+                   from public.audit_rollups
+                   where audit_id = %s::uuid and level = 'dimension'
+                     and coalesce(checks_ran, 0) = 0
+                   order by label""",
+                (audit_id,),
+            )
+            for row in cur.fetchall():
+                label = str(row.get("label") or row.get("key") or "").strip()
+                reason = str(row.get("not_measured_reason") or "").strip()
+                if not label:
+                    continue
+                not_checked.append(f"{label} - {reason}" if reason else label)
+            cur.execute(
+                "select crawl_verdict, crawl_note from public.audits where id = %s::uuid",
+                (audit_id,),
+            )
+            row = cur.fetchone() or {}
+            if str(row.get("crawl_verdict") or "") in {"thin", "blocked"}:
+                crawl_note = str(row.get("crawl_note") or "")
+            cur.execute(
+                "select score from public.audit_rollups "
+                "where audit_id = %s::uuid and level = 'site' and score is not null limit 1",
+                (audit_id,),
+            )
+            row = cur.fetchone() or {}
+            if row.get("score") is not None:
+                site_score = round(float(row["score"]))
+    except Exception:
+        logger.warning("public_page_highlights_failed")
+        return [], [], "", None
+    return findings, not_checked, crawl_note, site_score
+
+
+def _count_view(slug: str) -> None:
+    """Record that a published page was opened. Best-effort; never fails the read.
+
+    A COUNT AND A TIMESTAMP, nothing else (0161). The route is unauthenticated, so anything
+    that could identify the visitor would be tracking people who never agreed to it - and
+    the operator's real question, "did they look?", is fully answered by these two values.
+    """
+    try:
+        with privileged_connection() as cur:
+            cur.execute(
+                "update public.public_audit_pages"
+                " set views = views + 1, last_viewed_at = now()"
+                " where slug = %s and published",
+                (slug,),
+            )
+    except Exception:
+        logger.warning("public_page_view_count_failed")
+
+
 @router.get("/pages/{slug}", response_model=PublicPage)
 async def get_public_page(
     slug: str, settings: SettingsDep, store: PublicArtifactStoreDep
@@ -525,8 +692,15 @@ async def get_public_page(
     row = await asyncio.to_thread(_resolve_page, s)
     if row is None or str(row.get("status")) != "done":
         raise _PAGE_NOT_FOUND
+    # Counted on the METADATA read, which is the one request a human opening the page
+    # always makes - the report HTML and the PDF are fetched by some readers and not
+    # others, so counting those too would inflate one visit into three.
+    await asyncio.to_thread(_count_view, s)
     has_pdf, has_report = await asyncio.to_thread(
         _public_report_flags, store or local_store_from_settings(settings), row
+    )
+    top_findings, not_checked, crawl_note, site_score = await asyncio.to_thread(
+        _public_highlights, str(row["id"])
     )
     when = row.get("created_at")
     return PublicPage(
@@ -535,12 +709,17 @@ async def get_public_page(
         brand=_brand_from_url(str(row["url"])) or s,
         url=str(row["url"]),
         status=str(row["status"]),
-        score=row.get("score"),
+        # The coverage-aware rollup where there is one, so the header agrees with the
+        # report it is sitting on top of. See `_public_highlights`.
+        score=site_score if site_score is not None else row.get("score"),
         scores=row.get("scores") or {},
         has_pdf=has_pdf,
         has_report=has_report,
         when=when.isoformat() if isinstance(when, datetime) else (str(when) if when else None),
         fiverr_url=settings.fiverr_upsell_url,
+        top_findings=top_findings,
+        not_checked=not_checked,
+        crawl_note=crawl_note,
     )
 
 

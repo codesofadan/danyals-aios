@@ -307,9 +307,10 @@ export default function CitationsTab() {
 
           Three defects in one panel: a credential rendered into the DOM, a workflow that
           only existed on one person's laptop, and a completion that was asserted rather
-          than checked. The queue at /admin/citations/queue does the same job with a
-          claim, pre-computed values, measured time, and a completion that FETCHES the
-          URL and looks for the business before it counts. */}
+          than checked. The queue does the same job with a claim, pre-computed values,
+          measured time, and a completion that FETCHES the URL and looks for the business
+          before it counts. Its admin PAGE was removed 2026-09-22; the queue itself is
+          unchanged and is worked from the Citation Assistant extension. */}
       {readyToFinish.length > 0 && (
         <div className={w.step}>
           <div className={w.stepH}>
@@ -318,8 +319,8 @@ export default function CitationsTab() {
           </div>
           <div className="cs" style={{ marginBottom: 10 }}>
             These need one human step each — a category choice, a CAPTCHA, a confirmation.
-            The queue hands them out one at a time with every field already filled in, and
-            checks the listing is really live before it counts.
+            The Citation Assistant extension hands them out one at a time with every field
+            already filled in, and checks the listing is really live before it counts.
           </div>
           <div className={w.missList}>
             {readyToFinish.slice(0, 12).map((c) => (
@@ -330,10 +331,7 @@ export default function CitationsTab() {
             )}
           </div>
           <div className="op-toolset" style={{ marginTop: 10 }}>
-            <a className="primary-btn" href="/admin/citations/queue" style={{ textDecoration: "none" }}>
-              <span className="material-symbols-rounded">play_arrow</span>
-              Work the queue
-            </a>
+            <span className="op-muted">Work them from the Citation Assistant extension.</span>
           </div>
         </div>
       )}
@@ -603,19 +601,9 @@ export default function CitationsTab() {
                   </td>
                   <td><span className={`status-pill ${meta.cls}`}>{meta.label}</span></td>
                   <td>
-                    {c.submitStatus === "ready_for_human" ? (
-                      <a
-                        className="op-url"
-                        href={`/admin/citations/queue${gapClient ? `?client=${encodeURIComponent(gapClient)}` : ""}`}
-                        title={submitMeta.meaning}
-                      >
-                        <span className={`status-pill ${submitMeta.tone}`}>{submitMeta.label} →</span>
-                      </a>
-                    ) : (
-                      <span className={`status-pill ${submitMeta.tone}`} title={submitMeta.meaning}>
-                        {submitMeta.label}
-                      </span>
-                    )}
+                    <span className={`status-pill ${submitMeta.tone}`} title={submitMeta.meaning}>
+                      {submitMeta.label}
+                    </span>
                   </td>
                   <td className="op-muted" style={{ whiteSpace: "normal", maxWidth: 360 }}>
                     {c.blockedReason ? blockedReasonLabel(c.blockedReason) : c.note}

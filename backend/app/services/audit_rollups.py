@@ -123,6 +123,11 @@ class Rollup:
     url_health_pct: float | None = None
     basis_hash: str = ""
     scoring_model_version: str = SCORING_MODEL_VERSION
+    #: WHY this row has no score, in one sentence, and what the missing checks wait on
+    #: (0159). Set only where ``score is None``: a measured score has nothing to explain,
+    #: and a reason printed beside one would be read as a caveat on it.
+    not_measured_reason: str = ""
+    blocked_on: str = ""
 
 
 def weight(severity: str) -> float:
@@ -183,6 +188,58 @@ def subpoint_labels_from_coverage(coverage: dict[str, Any]) -> dict[str, str]:
     return {str(k): str(v) for k, v in raw.items() if v}
 
 
+#: The engine's per-check skip reason -> the sentence a client-facing scorecard prints.
+#: Written as a statement of what happened, never as an apology and never as a promise:
+#: "no data source was available" is checkable; "we will look next time" is not.
+REASON_COPY: dict[str, str] = {
+    "source_not_permitted": (
+        "no data source for these checks was available on this run"
+    ),
+    "ai_assisted_not_run": (
+        "these checks are answered by an AI specialist, which this audit depth does not "
+        "include"
+    ),
+    "not_in_selected_dimensions": "these checks were outside this run's scope",
+    "not_dispatched_by_this_command": (
+        "these checks are built but this audit command does not run them"
+    ),
+    "analyzer_path_unresolved": "these checks are not implemented yet",
+    "no_finding_emitted": "these checks ran but produced no result",
+    "unknown": "no reason was recorded",
+}
+
+
+def explain_unmeasured(
+    skip_reasons: dict[str, int],
+    blocked_on: dict[str, int],
+    *,
+    applicable: int,
+) -> tuple[str, str]:
+    """``(sentence, blocked_on)`` for a row that has no score.
+
+    Takes the DOMINANT reason - the one accounting for the most checks - rather than
+    listing every reason. A scorecard row has space for one sentence, and a row whose 80
+    checks were skipped for four different reasons is still, in practice, blocked on the
+    biggest one. The counts remain in ``skip_reasons`` for anyone who needs the breakdown.
+
+    Ties are broken alphabetically so the same input always yields the same sentence: this
+    string lands in a client's PDF, and a report regenerated a year from now must render
+    the report that was sent.
+    """
+    if not skip_reasons:
+        return "", ""
+    reason, count = max(sorted(skip_reasons.items()), key=lambda kv: kv[1])
+    text = REASON_COPY.get(reason, REASON_COPY["unknown"])
+    scope = f"{count} of {applicable}" if applicable else str(count)
+    blocker = ""
+    if blocked_on:
+        blocker = max(sorted(blocked_on.items()), key=lambda kv: kv[1])[0]
+    sentence = f"{scope} checks did not run: {text}"
+    if blocker:
+        sentence = f"{sentence} (waiting on {blocker})"
+    return sentence, blocker
+
+
 def build_rollups(
     *,
     causes: list[Cause],
@@ -237,6 +294,11 @@ def build_rollups(
     # --- coverage + score mass, walked over the WHOLE registry so every level
     # --- always knows its denominator ("25 of 100"), not just its numerator.
     skip_reason_by_id = {s["check_id"]: s.get("reason", "") for s in skipped}
+    # The engine records what each skipped check is BLOCKED ON, in words written for a
+    # person (`audit_engine/emit.py::_why_no_output`). Carrying it here is what lets an
+    # unmeasured row name the thing to fix instead of only its own emptiness.
+    blocked_on_by_id = {s["check_id"]: str(s.get("blocked_on") or "") for s in skipped}
+    blocked_on_tally: dict[tuple[str, str], dict[str, int]] = {}
     for check_id, spec in registry.items():
         keys = _bucket_keys(spec.pillar, spec.subcategory, spec.dimension)
         labels = {
@@ -264,6 +326,10 @@ def build_rollups(
                 r.checks_skipped += 1
                 reason = skip_reason_by_id.get(check_id, "unknown")
                 r.skip_reasons[reason] = r.skip_reasons.get(reason, 0) + 1
+                blocked = blocked_on_by_id.get(check_id, "")
+                if blocked:
+                    tally = blocked_on_tally.setdefault(rk, {})
+                    tally[blocked] = tally.get(blocked, 0) + 1
 
     # --- findings + instances
     for c in causes:
@@ -317,6 +383,13 @@ def build_rollups(
         r.pages_affected = len(urls_by_level.get(rk, ()))
         r.score = _score(ran_mass[rk], failed_mass[rk])
         r.url_health_pct = health if r.level == LEVEL_SITE else None
+        # WHY there is no score, for the rows that have none (0159). Only here: a
+        # measured row has nothing to explain, and a reason printed beside a real score
+        # would read as a caveat on the score itself.
+        if r.score is None:
+            r.not_measured_reason, r.blocked_on = explain_unmeasured(
+                r.skip_reasons, blocked_on_tally.get(rk, {}), applicable=r.checks_applicable
+            )
 
     order = {LEVEL_SITE: 0, LEVEL_DIMENSION: 1, LEVEL_PILLAR: 2, LEVEL_SUBPOINT: 3}
     return sorted(rollups.values(), key=lambda r: (order[r.level], r.key))

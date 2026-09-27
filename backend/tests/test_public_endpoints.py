@@ -197,4 +197,156 @@ def test_public_routes_have_no_auth_dependency() -> None:
 # agency's provider budget from the internet, and nothing in the money ledger
 # would show it. Each test below pins one of the controls that closes that.
 
+# --------------------------------------------------------------------------- #
+# The shared page's SUMMARY (the two blocks a reader sees before the report)
+# --------------------------------------------------------------------------- #
+#
+# The page used to be a score plus an embedded document. A reader who did not open the
+# document learned nothing actionable - and a free audit's SILENCE on off-page and local
+# read exactly like a clean bill of health, which is a claim nobody made and the page
+# implied. Both halves are now on the page, and both are asserted here.
+
+
+class _HighlightCur:
+    """A cursor double that answers the four reads `_public_highlights` makes, in order."""
+
+    def __init__(
+        self,
+        findings: list[dict[str, Any]],
+        unmeasured: list[dict[str, Any]],
+        audit: dict[str, Any],
+        site_score: dict[str, Any] | None,
+    ) -> None:
+        self.findings, self.unmeasured, self.audit, self.site_score = (
+            findings, unmeasured, audit, site_score,
+        )
+        self._rows: list[dict[str, Any]] = []
+        self._row: dict[str, Any] | None = None
+        self.sql: list[str] = []
+
+    def execute(self, sql: str, params: Any = None) -> None:
+        flat = " ".join(sql.split()).lower()
+        self.sql.append(flat)
+        self._rows, self._row = [], None
+        if "from public.audit_findings" in flat:
+            self._rows = list(self.findings)
+        elif "from public.audit_rollups" in flat and "level = 'dimension'" in flat:
+            self._rows = list(self.unmeasured)
+        elif "from public.audits" in flat:
+            self._row = dict(self.audit)
+        elif "from public.audit_rollups" in flat and "level = 'site'" in flat:
+            self._row = dict(self.site_score) if self.site_score else None
+
+    def fetchone(self) -> dict[str, Any] | None:
+        return self._row
+
+    def fetchall(self) -> list[dict[str, Any]]:
+        return self._rows
+
+
+def _install_highlights(monkeypatch: pytest.MonkeyPatch, cur: _HighlightCur) -> None:
+    from app.routers import public as mod
+
+    class _Ctx:
+        def __enter__(self) -> _HighlightCur:
+            return cur
+
+        def __exit__(self, *_a: Any) -> None:
+            return None
+
+    monkeypatch.setattr(mod, "privileged_connection", lambda: _Ctx())
+
+
+def test_the_public_summary_reads_cause_rows_and_ranks_them(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`scope_type` IS 'site' for a cause-level row (that is what audit_ingest writes).
+
+    Asking for 'cause' returned zero rows on a run with sixty-one findings, and an empty
+    summary reads as "nothing found" - the exact opposite of the truth."""
+    from app.routers.public import _public_highlights
+
+    cur = _HighlightCur(
+        findings=[
+            {"check_name": "Canonical tag validation", "severity": "critical",
+             "pages_affected": 12, "instance_count": 12},
+            {"check_name": "Thin content", "severity": "major",
+             "pages_affected": 3, "instance_count": 3},
+        ],
+        unmeasured=[],
+        audit={"crawl_verdict": "", "crawl_note": ""},
+        site_score=None,
+    )
+    _install_highlights(monkeypatch, cur)
+    findings, _, _, _ = _public_highlights("aud-1")
+    assert [f.title for f in findings] == ["Canonical tag validation", "Thin content"]
+    assert findings[0].pages == 12
+    assert "scope_type = 'site'" in cur.sql[0]
+    # `info` is not a problem, and listing it beside a critical flattens both.
+    assert "'critical', 'major', 'minor'" in cur.sql[0]
+
+
+def test_an_unmeasured_dimension_is_stated_with_its_reason(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.routers.public import _public_highlights
+
+    cur = _HighlightCur(
+        findings=[],
+        unmeasured=[
+            {"label": "Off-Page", "key": "offpage",
+             "not_measured_reason": "71 of 71 checks did not run: no data source"},
+            {"label": "Local SEO", "key": "local", "not_measured_reason": ""},
+        ],
+        audit={"crawl_verdict": "thin", "crawl_note": "This run reached 1 page of 15."},
+        site_score=None,
+    )
+    _install_highlights(monkeypatch, cur)
+    _, not_checked, crawl_note, _ = _public_highlights("aud-1")
+    assert not_checked[0].startswith("Off-Page - 71 of 71")
+    assert not_checked[1] == "Local SEO"  # no reason recorded: say the dimension, not a guess
+    assert crawl_note.startswith("This run reached")
+
+
+def test_the_page_score_agrees_with_the_report_it_embeds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Two scorers, one page. `audits.score` is the engine's overall, which folds a
+    dimension that never ran in as a zero; the site rollup is the coverage-aware score the
+    report prints. The page used to show 59 above a report that said 74.8."""
+    from app.routers.public import _public_highlights
+
+    cur = _HighlightCur(
+        findings=[], unmeasured=[], audit={"crawl_verdict": "", "crawl_note": ""},
+        site_score={"score": 74.8},
+    )
+    _install_highlights(monkeypatch, cur)
+    assert _public_highlights("aud-1")[3] == 75
+
+
+def test_a_run_with_no_rollup_keeps_its_stored_score(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.routers.public import _public_highlights
+
+    cur = _HighlightCur(
+        findings=[], unmeasured=[], audit={"crawl_verdict": "", "crawl_note": ""},
+        site_score=None,
+    )
+    _install_highlights(monkeypatch, cur)
+    assert _public_highlights("aud-1")[3] is None
+
+
+def test_a_summary_that_cannot_be_built_does_not_take_the_page_down(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The page rendered a score and a report long before it summarised itself, and it must
+    keep doing that when the summary read fails."""
+    from app.routers import public as mod
+
+    def _boom() -> Any:
+        raise RuntimeError("pool down")
+
+    monkeypatch.setattr(mod, "privileged_connection", _boom)
+    assert mod._public_highlights("aud-1") == ([], [], "", None)
 

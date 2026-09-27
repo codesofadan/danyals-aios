@@ -73,6 +73,7 @@ from app.services.web2_linkcheck import PageFetcher, check_link
 from integrations.llm import LLMResult, SystemSummarizer
 from integrations.web2_publishers import (
     DRAFT_ONLY_PLATFORMS,
+    UNSUPPORTED_PLATFORMS,
     WEB2_PLATFORMS,
     Web2Post,
     Web2Publisher,
@@ -199,13 +200,26 @@ def plan(
     topic: str | None = None,
     page_type: str = "blog",
     framework: str = "Auto",
+    word_target: int | None = None,
 ) -> Web2Plan:
     """Plan a placement. The article ``topic`` defaults to the ``anchor`` (the branded
     property is about the anchor's subject); the research ``brief`` is a deterministic,
     network-free seed (a branded authority post is on-topic + carries the link - it does
-    not chase a SERP teardown). ``framework`` ``"Auto"`` resolves per page type."""
+    not chase a SERP teardown). ``framework`` ``"Auto"`` resolves per page type.
+
+    ``word_target`` sizes the draft for the DESTINATION rather than for a blog. It exists
+    because platforms differ by an order of magnitude in what they accept - the measured
+    ceilings live in ``app.modules.web2.platform_spec`` - and a draft sized for a blog
+    does not arrive at a microblog shortened, it arrives truncated mid-sentence with the
+    editorial backlink cut off the end. ``None`` keeps the historical 900-word default,
+    so every existing caller is unaffected.
+
+    Note the generator's own floor still applies (``content_generator.WORD_COUNT_FLOOR``
+    is 600): a target below it cannot be honoured here, which is precisely why short-form
+    platforms are composed by ``app.modules.web2.note_composer`` instead of this path.
+    """
     resolved_topic = (topic or anchor).strip() or anchor
-    brief = _seed_brief(resolved_topic, client.geo, client.da)
+    brief = _seed_brief(resolved_topic, client.geo, client.da, word_target=word_target)
     resolved_fw = auto_framework(page_type) if framework == "Auto" else framework
     return Web2Plan(
         client_id=client.client_id,
@@ -221,7 +235,9 @@ def plan(
     )
 
 
-def _seed_brief(keyword: str, geo: str | None, da: float | None) -> ResearchBrief:
+def _seed_brief(
+    keyword: str, geo: str | None, da: float | None, *, word_target: int | None = None
+) -> ResearchBrief:
     """A minimal, deterministic :class:`ResearchBrief` seeded from the topic keyword -
     no SERP call. Enough structure for the generator to build a grounded, on-topic
     article; ``low_confidence`` is set (no live SERP research backed it)."""
@@ -242,7 +258,7 @@ def _seed_brief(keyword: str, geo: str | None, da: float | None) -> ResearchBrie
         table_stakes_entities=[],
         differentiator_entities=[],
         heading_blueprint=[],
-        word_count_target=_WEB2_WORD_TARGET,
+        word_count_target=word_target or _WEB2_WORD_TARGET,
         schema_types=[],
         media_target=1,
         freshness_expected=False,
@@ -554,19 +570,42 @@ def _degraded_article(plan: Web2Plan, reason: str) -> Web2Article:
 def publish(
     publisher: Web2Publisher, platform: str, article_body_md: str, anchor: str, target_url: str,
     *, external_id: str | None = None, tags: tuple[str, ...] = (),
+    slug: str = "", meta_description: str = "", canonical_url: str = "",
+    image_url: str = "", image_alt: str = "",
 ) -> Web2PublishResult:
     """Publish an approved article to ``platform`` via the injected publisher. The H1 is
     lifted as the post title; the remainder is rendered to HTML. Idempotent when
-    ``external_id`` is supplied (the publisher UPDATES that post)."""
+    ``external_id`` is supplied (the publisher UPDATES that post).
+
+    The SEO + media arguments (M05 REQ-W2-007/008) are all optional and default to empty,
+    so every existing caller is unchanged. They are derived per placement by
+    ``app.modules.web2.seo_fields``, which only produces what the destination platform's
+    measured spec says the adapter will actually transmit - so an empty value here means
+    "this platform has no such field", not "nobody bothered".
+
+    ``slug`` DEFAULTS to one derived from the title, preserving the historical behaviour
+    for callers that pass nothing; a supplied slug wins because it was derived against the
+    platform's own rules.
+
+    An image is passed only WITH its alt text. An image published on a client's behalf
+    with no alt text is an accessibility regression we authored, and the database refuses
+    the combination anyway (``web2_properties_image_alt_ck``) - enforcing it here too
+    means the publish path cannot construct what the store would reject.
+    """
     title, rest_md = split_title_and_body(article_body_md)
+    has_image = bool(image_url and image_alt)
     post = Web2Post(
         title=title or anchor,
         body_html=markdown_to_html(rest_md),
         anchor=anchor,
         target_url=target_url,
-        slug=_slugify(title or anchor),
+        slug=slug or _slugify(title or anchor),
         tags=tags,
         external_id=external_id,
+        meta_description=meta_description,
+        canonical_url=canonical_url,
+        image_url=image_url if has_image else "",
+        image_alt=image_alt if has_image else "",
     )
     return publisher.publish(platform, post)
 
@@ -602,6 +641,7 @@ def track(
     link_rel: str | None = None,
     link_found: bool | None = None,
     link_checked_at: Any = None,
+    idempotency_key: str | None = None,
 ) -> None:
     """Write one placement's new state back to ``web2_properties`` (only the given
     fields; ``updated_at`` is trigger-maintained)."""
@@ -626,6 +666,8 @@ def track(
         fields["link_found"] = link_found
     if link_checked_at is not None:
         fields["link_checked_at"] = link_checked_at
+    if idempotency_key is not None:
+        fields["idempotency_key"] = idempotency_key
     store.update_web2(web2_id, fields)
 
 
@@ -846,6 +888,28 @@ def run_publish(
             track(store, web2_id, status="failed", error=f"unknown platform: {platform}")
             return Web2Outcome(web2_id, "publish", "failed", reason="unknown platform")
 
+        # M05 A12: "A platform marked `unsupported` has no publishing code path at all."
+        # Medium is the worked example - its publishing API was WITHDRAWN, so REQ-W2-002
+        # ("official APIs only") puts it out rather than browser-automated.
+        #
+        # Until this check, the platform was merely DRAFT_ONLY: the pipeline accepted it,
+        # ran the paid draft, called a publisher for it and settled the placement at
+        # `pending` forever. That is a code path, and a metered one - which is exactly
+        # what A12 forbids. The refusal is placed BEFORE the cost gate so an unsupported
+        # platform cannot spend, and it is terminal rather than held: no amount of waiting
+        # makes a withdrawn API return.
+        if platform in UNSUPPORTED_PLATFORMS:
+            reason = (
+                f"{platform} has no supported publishing path (M05 REQ-W2-002: official "
+                "APIs only, and this platform's was withdrawn). Re-point this placement "
+                "at a platform the pipeline can actually publish to."
+            )
+            track(store, web2_id, status="failed", error=reason)
+            logger.info("web2_publish_unsupported_platform", web2_id=web2_id, platform=platform)
+            return Web2Outcome(
+                web2_id, "publish", "failed", reason=f"platform_unsupported:{platform}"
+            )
+
         # R2-07: a property published through a credential later found to be SHARED
         # across clients receives no further posts. The article already live is left
         # alone deliberately - deleting a live page is a larger, stranger signal than
@@ -892,6 +956,15 @@ def run_publish(
         try:
             result = publish(
                 publisher, platform, body_md, anchor, target_url, external_id=external_id,
+                # The SEO + media fields the drafting stage derived and stored. Read from
+                # the row rather than re-derived, so what publishes is exactly what a lead
+                # saw and approved at the review gate.
+                tags=tuple(row.get("tags") or ()),
+                slug=str(row.get("slug") or ""),
+                meta_description=str(row.get("meta_description") or ""),
+                canonical_url=str(row.get("canonical_url") or ""),
+                image_url=str(row.get("image_url") or ""),
+                image_alt=str(row.get("image_alt") or ""),
             )
         except Exception as exc:  # a provider failure marks failed (never stuck/never raised)
             gate.commit(ctx, ctx.estimated_cost)  # the attempt still incurred the metered cost
@@ -912,7 +985,14 @@ def run_publish(
             published_at=(now or _utcnow().date()), error="" if verified else why,
             link_rel=link.rel, link_found=link.found,
             link_checked_at=_utcnow() if link.state != "unknown" else None,
+            # A3: stamped on the row that actually published, so a redelivery of this same
+            # message computes the same key and the unique index refuses the second post.
+            idempotency_key=idempotency_key(row),
         )
+        # A8: record the placed link in its own ledger, so "live since March, lost in
+        # June" stays answerable. `track` writes the LATEST look onto web2_properties;
+        # this keeps the history that a removal can be detected against.
+        _record_placed_link(store, web2_id, row, result.post_url, target_url, link)
         logger.info(
             "web2_published", web2_id=web2_id, verified=verified, url=result.post_url,
             link=link.state, link_rel=link.rel or "-",
@@ -959,6 +1039,57 @@ def _client_id(row: dict[str, Any]) -> str | None:
     return str(cid) if cid else None
 
 
+class PlacedLinkStore(Protocol):
+    """The optional seam for the placed-link ledger (A8).
+
+    A Protocol with an optional implementation rather than a required store method,
+    because ``Web2Store`` has many implementers (the worker's, several fakes) and widening
+    a Protocol everyone satisfies is how a pure module acquires a hard dependency. A store
+    that does not provide it simply keeps the old behaviour.
+    """
+
+    def upsert_placed_link(self, web2_id: str, fields: dict[str, Any]) -> None: ...
+
+
+def _record_placed_link(
+    store: Web2Store,
+    web2_id: str,
+    row: dict[str, Any],
+    page_url: str,
+    target_url: str,
+    link: Any,
+) -> None:
+    """Fold this publish's link verdict into the placed-link ledger. Never raises.
+
+    Best-effort by design: the placement IS published by the time this runs, and failing
+    the publish over a bookkeeping write would turn a success into a retry that
+    double-posts. A missing ledger row is recoverable by the next link re-check; an
+    unnecessary republish is not.
+    """
+    writer = getattr(store, "upsert_placed_link", None)
+    if not callable(writer):
+        return
+    try:
+        from app.modules.web2.placed_links import LinkObservation, observe, state_from_check
+
+        seen = LinkObservation(
+            state=state_from_check(link.found, link.rel), rel=link.rel or ""
+        )
+        transition = observe(None, seen, now=_utcnow())
+        writer(
+            web2_id,
+            {
+                "client_id": _client_id(row),
+                "page_url": page_url,
+                "target_url": target_url,
+                "anchor": str(row.get("anchor") or ""),
+                **transition.fields,
+            },
+        )
+    except Exception as exc:
+        logger.warning("web2_placed_link_not_recorded", web2_id=web2_id, error=repr(exc))
+
+
 def _safe_mark_failed(store: Web2Store, web2_id: str, reason: str) -> None:
     """Best-effort terminal mark on an unexpected error; suppresses its own failures so
     the error path never raises."""
@@ -966,6 +1097,33 @@ def _safe_mark_failed(store: Web2Store, web2_id: str, reason: str) -> None:
         store.update_web2(web2_id, {"status": "failed", "error": reason[:_ERROR_MAX]})
     except Exception:
         logger.warning("web2_mark_failed_failed", web2_id=web2_id)
+
+
+def idempotency_key(row: dict[str, Any]) -> str:
+    """The key that makes a redelivered publish collide with itself (M05 A3).
+
+    DERIVED, never random. ``run_publish`` guards on ``status == "publishing"``, which is
+    a READ followed by a WRITE with nothing between them - two workers handed the same
+    redelivered message both read ``publishing`` and both publish. M05 §3 says why that
+    is not a cosmetic duplicate: on a social platform a double post is a SPAM SIGNAL.
+
+    A derived key means the second attempt computes the SAME value as the first by
+    construction, so the unique index refuses it - rather than depending on someone
+    remembering to thread an idempotency token through every call site.
+
+    Built from the placement's identity (the row id) plus what it publishes (platform,
+    target, topic). The row id alone would be enough for the uniqueness guarantee; the
+    rest is included so the key is legible in the database, which is where somebody will
+    be looking when they are trying to work out why a publish was refused.
+    """
+    parts = [
+        str(row.get("id") or ""),
+        str(row.get("platform") or ""),
+        str(row.get("target_url") or ""),
+        str(row.get("topic") or row.get("anchor") or ""),
+    ]
+    seed = "|".join(part.strip() for part in parts)
+    return hashlib.sha256(seed.encode("utf-8")).hexdigest()[:32]
 
 
 def _utcnow() -> datetime:

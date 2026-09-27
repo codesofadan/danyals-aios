@@ -17,8 +17,10 @@ import {
 import { useClients } from "@/lib/hooks/clients";
 import Web2AccountBoard from "./Web2AccountBoard";
 import Web2PlacementTable from "./Web2PlacementTable";
-import Web2ArticleWizard from "./Web2ArticleWizard";
 import Web2StatusBoard from "./Web2StatusBoard";
+import Web2ConnectionPlan from "./Web2ConnectionPlan";
+import Web2BroadcastComposer from "./Web2BroadcastComposer";
+import Web2PlacedLinks from "./Web2PlacedLinks";
 import ReadMore from "@/components/ui/ReadMore";
 
 type FilterKey = "all" | Web2Verified;
@@ -45,11 +47,15 @@ const PIPELINE_META: Record<Web2PipelineStatus, { label: string; cls: string }> 
 
 export default function Web2Tab() {
   const [filter, setFilter] = useState<FilterKey>("all");
-  const [view, setView] = useState<"ledger" | "links" | "accounts" | "status">("ledger");
+  const [view, setView] = useState<
+    "ledger" | "links" | "health" | "access" | "accounts" | "status"
+  >("ledger");
   const web2Q = useWeb2();
   const web2Properties = web2Q.data ?? [];
   const approve = useApproveWeb2();
-  const [showPlan, setShowPlan] = useState(false);
+  // "Write once, publish everywhere" — one subject, a platform tick-list or All, and the
+  // whole fan-out shown before a single drafting run is billed.
+  const [showBroadcast, setShowBroadcast] = useState(false);
   const [flash, setFlash] = useState<string | null>(null);
 
   // WHOSE accounts the Accounts view is showing and registering.
@@ -138,16 +144,21 @@ export default function Web2Tab() {
             actions were sharing one flex line with two segmented controls and two
             buttons, which crowded on any laptop-width screen. */}
         <div className="op-toolset">
-          {/* THE PRIMARY DOOR (2026-09-12). One article, start to finish, in four
-              steps: client -> brief -> read it -> choose where it publishes. It is the
-              primary button because it is what an operator does most, and because it is
-              the only path where the approver has actually READ the article. */}
+          {/* THE ONE DOOR (2026-09-22, owner instruction). This screen carried two
+              buttons — the single-article wizard and this fan-out — and two doors into
+              the same table with different rules is exactly what the 2026-09-12 rewrite
+              set out to remove and then reintroduced. The fan-out is the flow the
+              product is being built to, so it is now the only one; the single-article
+              wizard is PARKED (see `parked.registry.ts`), not deleted.
+
+              It is honest about cost: the plan writes nothing, and every placement
+              still stops at the review gate before anything reaches a live site. */}
           <button
-            className="primary-btn" onClick={() => setShowPlan(true)}
-            title="Write one article: pick the client, brief the writer, read what it wrote, then publish by API or hand it to the extension."
+            className="primary-btn" onClick={() => setShowBroadcast(true)}
+            title="One subject, a platform tick-list or All. Shows exactly what each platform would receive before anything is drafted or billed."
           >
-            <span className="material-symbols-rounded">edit_note</span>
-            Write a new Web 2.0 article
+            <span className="material-symbols-rounded">campaign</span>
+            Write once, publish everywhere
           </button>
         </div>
       </div>
@@ -156,6 +167,11 @@ export default function Web2Tab() {
         <div className="seg">
           <button className={view === "ledger" ? "on" : undefined} onClick={() => setView("ledger")}>Placements</button>
           <button className={view === "links" ? "on" : undefined} onClick={() => setView("links")}>Links built</button>
+          {/* DISTINCT FROM "Links built". That view lists placements and their latest
+              look; this one reads the ledger, which keeps the TRANSITION — so "live in
+              March, lost in June" has an answer instead of being overwritten. */}
+          <button className={view === "health" ? "on" : undefined} onClick={() => setView("health")}>Link health</button>
+          <button className={view === "access" ? "on" : undefined} onClick={() => setView("access")}>Publishing access</button>
           <button className={view === "accounts" ? "on" : undefined} onClick={() => setView("accounts")}>Accounts</button>
             <button className={view === "status" ? "on" : undefined} onClick={() => setView("status")}>Integrations</button>
         </div>
@@ -171,7 +187,8 @@ export default function Web2Tab() {
       </div>
 
       {view === "links" && <LinksBuilt />}
-      {view === "accounts" && (
+      {view === "health" && <Web2PlacedLinks />}
+      {(view === "accounts" || view === "access") && (
         <>
           <div
             style={{
@@ -180,7 +197,7 @@ export default function Web2Tab() {
             }}
           >
             <label htmlFor="w2-accounts-client" style={{ fontSize: 13, fontWeight: 700, color: "var(--ink)" }}>
-              Accounts for
+              {view === "access" ? "Publishing access for" : "Accounts for"}
             </label>
             {/* HOUSE IS THE EXCEPTION, NOT THE DEFAULT. This select used to open on
                 "House (agency-shared)", and the register form derives ownership from
@@ -197,21 +214,35 @@ export default function Web2Tab() {
               onChange={(e) => setAccountsClientId(e.target.value)}
               style={{ minWidth: 240 }}
             >
-              <option value="">Choose whose account…</option>
+              <option value="">
+                {view === "access" ? "Choose a client…" : "Choose whose account…"}
+              </option>
               {clientList.map((c) => (
                 <option key={c.id} value={c.id}>{c.cn}</option>
               ))}
-              <option value={HOUSE}>House (agency-shared) — Telegra.ph only</option>
+              {/* HOUSE IS AN ACCOUNTS CONCEPT ONLY. A connection plan answers "what does
+                  THIS CLIENT's login reach", and the agency's shared account has no
+                  client login to reason about — offering it here would produce a screen
+                  that could only ever say "no shared login is set". */}
+              {view === "accounts" && (
+                <option value={HOUSE}>House (agency-shared) — Telegra.ph only</option>
+              )}
             </select>
             <span className="cs" style={{ flexBasis: "100%" }}>
-              {accountsClientId === HOUSE
-                ? "House accounts are shared across every client, so one suspension takes them all down. Only a platform where publishing implies no durable identity — Telegra.ph and the like — should use one."
-                : accountsClientId
-                  ? "New accounts here are owned by this client, which is what almost every platform requires."
-                  : "Pick a client to see and register accounts they own. Almost every platform needs a per-client account; House is for the few where publishing carries no durable identity."}
+              {view === "access"
+                ? "One username and one password per client, used as their identity on every platform. The screen below says how far that login actually reaches — and names the single next action for each platform that is not there yet."
+                : accountsClientId === HOUSE
+                  ? "House accounts are shared across every client, so one suspension takes them all down. Only a platform where publishing implies no durable identity — Telegra.ph and the like — should use one."
+                  : accountsClientId
+                    ? "New accounts here are owned by this client, which is what almost every platform requires."
+                    : "Pick a client to see and register accounts they own. Almost every platform needs a per-client account; House is for the few where publishing carries no durable identity."}
             </span>
           </div>
-          {accountsClientId === "" ? (
+          {view === "access" ? (
+            <Web2ConnectionPlan
+              clientId={accountsClientId && accountsClientId !== HOUSE ? accountsClientId : undefined}
+            />
+          ) : accountsClientId === "" ? (
             <div className="op-empty">
               Choose a client above to see the accounts they own and register new ones.
               Accounts are per-client by default because that is what the platforms
@@ -257,7 +288,7 @@ export default function Web2Tab() {
           </div>
         </div>
       )}
-      {showPlan && <Web2ArticleWizard onClose={() => setShowPlan(false)} />}
+      {showBroadcast && <Web2BroadcastComposer onClose={() => setShowBroadcast(false)} />}
       {flash && (
         <div className="op-flash">
           <span className="material-symbols-rounded">task_alt</span>{flash}

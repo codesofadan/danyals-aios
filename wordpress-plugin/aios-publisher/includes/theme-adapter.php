@@ -130,9 +130,19 @@ function aios_publisher_enqueue_article_assets() {
 	// but the design CSS still must. Registering a STANDALONE empty handle gives the
 	// inline styles somewhere to hang without dragging in the article template's
 	// stylesheet, which would fight Elementor's own rules.
-	$elementor = aios_publisher_is_elementor_page( $post_id );
-	$handle    = $elementor ? 'aios-publisher-design' : 'aios-publisher-article';
-	if ( $elementor ) {
+	//
+	// A SELF-CONTAINED DESIGN PAGE IS THE SAME CASE, for the same reason. It arrives with
+	// a complete stylesheet built from the client's own design system, and article.css is
+	// written for a flat article body - so loading both puts two stylesheets on one page
+	// and the article one wins wherever the design's selectors are no more specific.
+	// MEASURED by rendering the published page beside the local preview: article.css puts
+	// `border-bottom: 2px solid` on every `h2` inside `.aios-article`, so every section
+	// heading on the published page carried a coloured rule the design never drew. Same
+	// class of defect as shipping two RENDERERS, expressed in CSS.
+	$standalone = aios_publisher_is_elementor_page( $post_id )
+		|| aios_publisher_is_self_contained( $post_id );
+	$handle     = $standalone ? 'aios-publisher-design' : 'aios-publisher-article';
+	if ( $standalone ) {
 		wp_register_style( $handle, false, array(), AIOS_PUBLISHER_VERSION );
 		wp_enqueue_style( $handle );
 	} else {
@@ -155,6 +165,54 @@ function aios_publisher_enqueue_article_assets() {
 	$design_css = aios_publisher_sanitize_css( $design_css );
 	if ( '' !== $design_css ) {
 		wp_add_inline_style( $handle, $design_css );
+	}
+	// The typefaces that CSS asks for, loaded BEFORE it so the rules have something to
+	// apply. Without this the family is named and never fetched, and the page renders in
+	// the theme's font - which reads as a broken layout and is a missing webfont.
+	aios_publisher_enqueue_design_fonts( $post_id );
+}
+
+/**
+ * Load the design's typefaces from Google Fonts for a managed post.
+ *
+ * Only the families the push actually named, only on a managed post, and only ever from
+ * fonts.googleapis.com. `display=swap` so text paints in a fallback immediately rather
+ * than leaving the page blank while the font downloads.
+ *
+ * @param int $post_id The managed post being rendered.
+ * @return void
+ */
+function aios_publisher_enqueue_design_fonts( $post_id ) {
+	$families = get_post_meta( $post_id, AIOS_PUBLISHER_META_DESIGN_FONTS, true );
+	if ( ! is_array( $families ) || empty( $families ) ) {
+		return;
+	}
+	// ONE STYLESHEET PER FAMILY, deliberately, rather than one request naming them all.
+	//
+	// The Google Fonts css2 endpoint answers 400 for a request containing ANY family it
+	// does not recognise, and a 400 returns no CSS at all - so a single unknown name takes
+	// every valid family in the same URL down with it and the page silently renders in the
+	// theme's font. Unknown names are not hypothetical here: the analyzer transcribes what
+	// a site's CSS actually says, and real stacks carry build-tool artefacts
+	// ("Inter Fallback" was measured on a live capture) that no font host has ever heard
+	// of. Separate requests make each family independent: the bad one 404s alone.
+	$index = 0;
+	foreach ( array_slice( $families, 0, 8 ) as $family ) {
+		// Re-sanitized at render time as well as at write time: post meta is durable and
+		// this value is emitted into a URL, so it is re-checked where it is used.
+		$name = trim( preg_replace( '/[^A-Za-z0-9 \-]/', '', (string) $family ) );
+		if ( '' === $name ) {
+			continue;
+		}
+		++$index;
+		wp_enqueue_style(
+			'aios-design-font-' . $index,
+			// The weights the AIOS renderer uses: 400/500/600 body, 700/800 headings.
+			'https://fonts.googleapis.com/css2?family=' . rawurlencode( $name )
+				. ':wght@400;500;600;700;800&display=swap',
+			array(),
+			AIOS_PUBLISHER_VERSION
+		);
 	}
 }
 
@@ -180,6 +238,26 @@ function aios_publisher_render_article( $content ) {
 		return $content;
 	}
 
+	// A SELF-CONTAINED DESIGN PAGE IS ALREADY FINISHED. It arrives as a complete
+	// document - hero, sections, FAQ accordion, closing call to action - built to the
+	// client's own design system and styled by the design CSS enqueued in <head>. The
+	// furniture below is for a long-form ARTICLE, whose body is a flat run of headings
+	// and paragraphs that genuinely needs a byline, a table of contents and a CTA added.
+	//
+	// Applying both produces a page carrying each thing TWICE: an author line above a
+	// designed hero, a generated table of contents listing the section headings, and then
+	// a second FAQ accordion and a second call-to-action banner beneath the ones the page
+	// already had. That is the reported difference between the local preview and the
+	// published page, and it is not a styling problem - it is two renderers running.
+	//
+	// So a self-contained page gets the full-bleed wrapper and NOTHING else: the breakout
+	// is still needed (the theme's narrow content column would strangle it), the
+	// decoration is not.
+	if ( aios_publisher_is_self_contained( $post_id, $content ) ) {
+		return '<div class="aios-article aios-article--full aios-article--designed">'
+			. $content . '</div>';
+	}
+
 	$read_time = aios_publisher_read_time( $content );
 	list( $content, $toc ) = aios_publisher_build_toc( $content );
 
@@ -203,6 +281,34 @@ function aios_publisher_render_article( $content ) {
 		. $faq
 		. $cta
 		. '</div>';
+}
+
+/**
+ * Whether this post is a COMPLETE AIOS design page rather than an article to decorate.
+ *
+ * Two signals, either of which is sufficient:
+ *
+ *  - the post meta the push sets (`_aios_self_contained`), which is the explicit answer
+ *    and the one a current platform always sends; and
+ *  - the `aios-doc` wrapper the model renderer emits, which nothing else on a WordPress
+ *    site produces. Kept as a fallback so a page pushed by an older platform - or one
+ *    already sitting on the site before this version - behaves correctly too, rather than
+ *    needing a re-push to stop rendering its FAQ and its CTA twice.
+ *
+ * @param int    $post_id The managed post id.
+ * @param string $content The post content being rendered.
+ * @return bool
+ */
+function aios_publisher_is_self_contained( $post_id, $content = null ) {
+	if ( get_post_meta( $post_id, AIOS_PUBLISHER_META_SELF_CONTAINED, true ) ) {
+		return true;
+	}
+	// Called from the ENQUEUE hook there is no filtered content yet, so the post's own
+	// body is read instead. Both callers ask the same question of the same page.
+	if ( null === $content ) {
+		$content = get_post_field( 'post_content', $post_id );
+	}
+	return false !== strpos( (string) $content, 'aios-doc' );
 }
 
 /**

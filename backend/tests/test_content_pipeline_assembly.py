@@ -171,15 +171,21 @@ class TestAMissingDependencyOmitsItsStageRatherThanFakingIt:
         )
 
     def test_fully_bound_covers_every_declared_stage(self) -> None:
-        """Both sequences: a full page, and a reviewer's edit. A declared stage
-        that cannot be bound is a step `run_page` silently skips."""
-        from app.services.content_pipeline.runner import EDIT_STAGES
+        """ALL THREE sequences: a wireframed page, a prose article, and a reviewer's
+        edit. A declared stage that cannot be bound is a step `run_page` silently skips.
+
+        `TEMPLATED_STAGES` joined the set when the wireframe path landed: a service or
+        about page is built by filling typed slots (`compose`), not by outlining and
+        drafting a document, and a `compose` that failed to bind would have made every
+        templated page skip the one stage that writes it.
+        """
+        from app.services.content_pipeline.runner import EDIT_STAGES, TEMPLATED_STAGES
 
         stages = build_page_stages(
             writer=_Writer(), researcher=object(), store=_Store(),  # type: ignore[arg-type]
             images=_Images(), cost_gate=_CostGate(), settings=get_settings(),  # type: ignore[arg-type]
         )
-        assert set(stages) == set(PAGE_STAGES) | set(EDIT_STAGES)
+        assert set(stages) == set(PAGE_STAGES) | set(EDIT_STAGES) | set(TEMPLATED_STAGES)
 
 
 # --- what the sequence then does --------------------------------------------- #
