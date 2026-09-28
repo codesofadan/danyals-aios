@@ -150,7 +150,11 @@ def test_context_provider_defaults() -> None:
     assert s.embeddings_api_key is None
     assert s.pinecone_api_key is None and s.pinecone_index is None
     assert s.anthropic_model_summary == "claude-haiku-4-5"
-    assert s.anthropic_model_heavy == "claude-sonnet-5"
+    # HEAVY is Haiku too, on the operator's cost instruction (2026-09-28). Sonnet is
+    # $3/$15 per MTok against Haiku's $1/$5 - a flat 3x on every heavy fold - and on
+    # 2026-09-26 the same two settings were BOTH claude-opus-5, which is what made 74
+    # calls cost $9.47 in a day. Deliberate quality-for-cost trade, not a fallback.
+    assert s.anthropic_model_heavy == "claude-haiku-4-5"
     assert s.embeddings_provider == "voyage"
     assert s.embeddings_dim == 1024
     assert s.context_topk == 6

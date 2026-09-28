@@ -159,7 +159,11 @@ def build_page_stages(
         # `writer` so the stage can author scenes that are actually ABOUT this page;
         # it is None on a keyless deploy and the stage falls back to the scene bank.
         stages["images"] = lambda ctx: run_images(
-            ctx, generator=images, gate=cost_gate, settings=settings, writer=writer,
+            ctx, generator=images, gate=cost_gate, settings=settings,
+            # None here is not "no writer available" - it is the operator choosing the
+            # deterministic scene bank over a paid call per picture. The stage already
+            # takes that path when a deploy has no key, so it is the tested one.
+            writer=(writer if getattr(settings, "content_image_scenes_llm", True) else None),
             # A TEMPLATED PAGE ASKS FOR THE NUMBER OF PICTURES IT CAN ACTUALLY PLACE.
             # A service page is hero/grid/steps/accordion/price: exactly one image fits.
             # The default cap would make five, four of which the renderer has nowhere to
@@ -183,6 +187,17 @@ def build_page_stages(
     stages["schema_links"] = lambda ctx: run_schema_links(
         ctx, business=business, url=page_url, internal_urls=internal_urls,
     )
-    stages["gate"] = lambda ctx: run_gate(ctx, writer=writer, model=model)
+    # Same shape as the image stage above: withholding the writer makes `content_qa`
+    # score its five judged dimensions on deterministic proxies AND say that it did,
+    # rather than reporting a judged-looking number nobody judged.
+    stages["gate"] = lambda ctx: run_gate(
+        ctx,
+        writer=(
+            writer
+            if settings is None or getattr(settings, "content_qa_judge_enabled", True)
+            else None
+        ),
+        model=model,
+    )
 
     return stages

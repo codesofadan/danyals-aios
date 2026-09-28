@@ -204,7 +204,7 @@ class Settings(BaseSettings):
     # provider. Key is a SecretStr (never logged / never in a repr).
     anthropic_api_key: SecretStr | None = None
     anthropic_model_summary: str = "claude-haiku-4-5"  # cheap default fold
-    anthropic_model_heavy: str = "claude-sonnet-5"  # heavier model for large folds
+    anthropic_model_heavy: str = "claude-haiku-4-5"  # heavier model for large folds
     # Anthropic-compatible GATEWAY host (Agent Router, LiteLLM, a self-hosted proxy).
     # Blank = talk to Anthropic directly, which is the historical behaviour. Set it and
     # every Anthropic call in the platform is re-pointed, including the audit engine
@@ -310,7 +310,7 @@ class Settings(BaseSettings):
     # `anthropic_api_key`; keyless / a dial-block / an SDK-or-model that can't web-search
     # all DEGRADE (200, status='degraded'), never crash. web_search_20250305 runs on both
     # Haiku and Sonnet; we default to Sonnet so an on-demand answer is genuinely IN-DEPTH. ---
-    policy_research_model: str = "claude-sonnet-5"  # web-search-capable Claude for /policy/ask (deep)
+    policy_research_model: str = "claude-haiku-4-5"  # web-search-capable Claude for /policy/ask (deep)
     policy_research_max_searches: int = 5  # web_search tool max_uses per lookup (<=5)
 
     # --- Daily Policy-Radar GENERATOR (replaces the Google-scrape watcher as the DEFAULT
@@ -322,7 +322,7 @@ class Settings(BaseSettings):
     # written), never crash. The manual POST /policy/generate forces a run past the
     # once-per-day guard so an operator can refresh on demand. ---
     policy_daily_count: int = 6                     # policy items generated per day
-    policy_generate_model: str = "claude-sonnet-5"  # web-search-capable, deeper than Haiku
+    policy_generate_model: str = "claude-haiku-4-5"  # web-search-capable, deeper than Haiku
     policy_generate_hour: int = 6                    # daily beat fire hour (UTC)
     policy_generate_minute: int = 0                  # daily beat fire minute (UTC)
 
@@ -403,6 +403,26 @@ class Settings(BaseSettings):
     # per-image spend has been watched on a real job. 0 disables images on v2 while
     # leaving v1's photos alone; content_images_enabled=false disables BOTH.
     content_pipeline_max_images: int = 1
+    # --- Which LLM calls a page is allowed to make ---------------------------
+    # MEASURED (2026-09-26): 74 Anthropic calls across 11 pages, $9.47, on a day when
+    # both tiers were claude-opus-5. That is ~6.7 calls per page, and only TWO of them
+    # write anything a reader sees (sme, compose). The rest are utility calls that the
+    # pipeline already has deterministic code paths for - they were wired to a model
+    # because a model was available, not because arithmetic could not do it.
+    #
+    # Both flags below switch a stage to the Python path it ALREADY falls back to when
+    # its writer is missing, so neither is new untested code - it is the degrade path,
+    # promoted to a choice. Each saves one paid call per page.
+    #
+    # JUDGE: five of `content_qa`'s fourteen dimensions route through a Claude judge;
+    # with it off they score on conservative proxies and the verdict SAYS SO. Worth
+    # keeping ON while a page type is new and OFF for bulk runs of a proven one.
+    content_qa_judge_enabled: bool = True
+    # IMAGE SCENES: on, a writer call authors a bespoke scene per picture; off, the
+    # scene comes from the eight-scene corporate bank, chosen by a hash of the section
+    # so it is stable per page. The topical payload is the ALT text either way, and the
+    # alt is the section's own heading - which no model was needed for.
+    content_image_scenes_llm: bool = True
     # Per-call cost estimates for the money-dial (a later chunk wires these in).
     content_research_cost_estimate: float = 0.01
     content_generate_cost_estimate: float = 0.15
@@ -456,7 +476,7 @@ class Settings(BaseSettings):
     # To revert: CONTENT_ENGINE=v1 in the environment. Nothing else changes - both
     # engines land a job at `needs_review` and share the publish path.
     content_engine: str = "v2"
-    content_research_model: str = "claude-sonnet-5"  # web-search Claude for the page-set recommender
+    content_research_model: str = "claude-haiku-4-5"  # web-search Claude for the page-set recommender
     # Pages returned per BULK PAGE RESEARCH (the default cap; the caller may still
     # ask for more). Five, not twelve, on the owner's 2026-09-17 instruction: a bulk
     # research proposes a small set built around ONE topical map (the recommender
@@ -474,7 +494,7 @@ class Settings(BaseSettings):
     # `content` money-dial (committed spend = Anthropic token cost only); a missing key /
     # a dial-block / an analysis failure DEGRADES (200, status='degraded'), never crashes.
     # All additive + optional. ---
-    content_design_model: str = "claude-sonnet-5"  # Claude tier (VISION) that reads the screenshot + page content
+    content_design_model: str = "claude-haiku-4-5"  # Claude tier (VISION) that reads the screenshot + page content
     content_design_max_pages: int = 3  # fallback fetcher: homepage + up to N-1 same-domain internal pages
     # A VISION call carrying a screenshot + a rendered-page wireframe reply is bigger than
     # the old text-only extract, so this is bumped to fit the self-contained wireframe HTML.
