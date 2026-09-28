@@ -31,20 +31,22 @@ import {
 } from "../lib/rotation";
 import { clearClaim, readClaim, unbankedSeconds, writeClaim } from "../lib/session";
 import {
-  type ActiveSession,
   clearSession,
   fillPlanFor,
   markTelemetrySent,
   mergeServerSession,
+  openUrlFor,
   readSession,
   sessionKind,
   taskForTab,
-  openUrlFor,
   tasksNeedingTabs,
-  withoutTab,
+  tasksReadyToFill,
+  type ActiveSession,
   withTab,
+  withoutTab,
   writeSession,
 } from "../lib/sessionBoard";
+import type { FillAllItem, FillAllSummary } from "../lib/sessionBoard";
 
 const HEARTBEAT_ALARM = "aios-queue-heartbeat";
 const SESSION_HEARTBEAT_ALARM = "aios-session-heartbeat";
@@ -267,6 +269,87 @@ async function autofillSessionTask(taskId: string): Promise<FillOutcome> {
   return outcome;
 }
 
+
+/**
+ * FILL EVERY OPEN DIRECTORY FROM ONE CLICK.
+ *
+ * THE JOB THIS REPLACES. A ten-directory batch was ten manual rounds: focus the tab,
+ * press fill, read the result, move to the next tab. The tabs were already open and each
+ * one already knew which task it belonged to (`tabMap`), so the tab-switching was pure
+ * ceremony - the operator was acting as a for-loop.
+ *
+ * WHY IT DOES NOT SUBMIT. Filling is reversible and local; submitting creates a public
+ * listing under a client's name on a third-party site, and a wrong one cannot be recalled.
+ * A form the filler reports as complete can still be wrong in ways only a human sees - a
+ * dropdown that took the first option, a category that is nearly right, a honeypot the
+ * heuristic filled in good faith. So the sweep stops at filled, and submitting stays
+ * one-by-one behind the operator's own eyes. That is the same line the manifest has always
+ * drawn ("never submits for you"); this makes the filling side stop being manual, not the
+ * deciding side.
+ *
+ * SEQUENTIAL, NOT PARALLEL. Ten `executeScript` calls at once means ten content scripts
+ * and ten AI mappings racing; on a slow machine that is where a tab gets skipped because
+ * it had not finished loading. One at a time is slower in theory and more predictable in
+ * practice, and the panel can report progress as it goes.
+ *
+ * ONE DIRECTORY'S FAILURE IS NOT THE SWEEP'S. Every task is attempted inside its own
+ * try/catch: a directory that throws is recorded and the loop continues. The alternative -
+ * aborting - means one broken site costs the operator the other nine fills.
+ */
+async function fillAllTasks(mode: "heuristic" | "ai" = "heuristic"): Promise<FillAllSummary> {
+  let state = await readSession();
+  if (!state) throw new Error("No active session.");
+
+  // Open anything released that has no tab yet, so "fill all" means all of them and not
+  // "the ones that happened to be open".
+  state = await openTabsForReleased(state);
+
+  const ready = tasksReadyToFill(state);
+  const items: FillAllItem[] = [];
+
+  for (const task of ready) {
+    const name = nameForTask(state, task.taskId);
+    try {
+      const outcome =
+        mode === "ai"
+          ? (await aiFillSessionTask(task.taskId)).outcome
+          : await autofillSessionTask(task.taskId);
+      items.push({
+        taskId: task.taskId,
+        name,
+        filled: outcome.filled.length,
+        failed: outcome.failed.length,
+        error: "",
+      });
+    } catch (err) {
+      items.push({
+        taskId: task.taskId,
+        name,
+        filled: 0,
+        failed: 0,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  const succeeded = items.filter((i) => i.filled > 0).length;
+  return {
+    attempted: items.length,
+    succeeded,
+    needsAttention: items.length - succeeded,
+    items,
+  };
+}
+
+/** A directory's display name for the sweep report, falling back to the task id so a row
+ *  is never nameless. */
+function nameForTask(state: ActiveSession, taskId: string): string {
+  const cit = state.tasks.find((t) => t.taskId === taskId);
+  if (cit) return String((cit as { name?: string }).name ?? "") || taskId;
+  const w2 = (state.web2Tasks ?? []).find((t) => t.taskId === taskId);
+  if (w2) return String((w2 as { platform?: string }).platform ?? "") || taskId;
+  return taskId;
+}
 
 /** The stages the panel reports while an AI-assisted fill runs. */
 export type AiFillStage = "analyzing" | "mapping" | "filling" | "ready" | "held";
@@ -716,6 +799,9 @@ async function handle(request: PanelRequest): Promise<PanelResponse> {
 
       case "openAndAutofill":
         return { ok: true, data: await openAndAutofill(request.taskId) };
+
+      case "fillAllTasks":
+        return { ok: true, data: await fillAllTasks(request.mode ?? "heuristic") };
 
       case "markSubmitted": {
         // The server probe is the default door: it fetches the URL and a refusal

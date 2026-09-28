@@ -47,6 +47,26 @@ export type ActiveSession = {
 /** The kind-neutral view of one task - what tab orchestration and telemetry need,
  *  whichever lane the session works. `openUrl` is the citation add-form or the web2
  *  editor URL; "" means "nothing to open" and the panel says so honestly. */
+/** What one fill-all sweep did, per directory. The panel renders this verbatim: an
+ *  operator needs to know WHICH directory needs a hand, not a total. */
+export type FillAllItem = {
+  taskId: string;
+  name: string;
+  filled: number;
+  failed: number;
+  /** Set when this directory could not be attempted at all (no tab, no values, threw). */
+  error: string;
+};
+
+export type FillAllSummary = {
+  attempted: number;
+  /** Directories where at least one field stuck. */
+  succeeded: number;
+  /** Directories that need the operator: no form found, nothing filled, or an error. */
+  needsAttention: number;
+  items: FillAllItem[];
+};
+
 export type TaskRef = { taskId: string; uiState: SessionTaskState; batchNo: number; openUrl: string };
 
 export function sessionKind(state: ActiveSession): SessionKind {
@@ -182,6 +202,24 @@ const RELEASED_STATES = new Set(["released", "opened", "form_detected", "filled"
  *  session starts or a batch releases. Kind-neutral: a citation task opens its
  *  add-form URL, a web2 task its (spec-pinned or homepage) editor URL; a task with
  *  no URL is never opened — the panel offers it by hand instead. */
+/** Released, non-terminal tasks that ALREADY have a tab — what a fill-all sweep acts on.
+ *
+ *  The complement of `tasksNeedingTabs`. The two together are the whole released set, and
+ *  keeping them separate is what lets one button open the missing tabs and then fill every
+ *  tab, without the operator ever leaving the panel.
+ *
+ *  A task that is already `filled` is EXCLUDED. Re-filling one is not idempotent in the way
+ *  it looks: a directory form that has been edited by hand since the last fill would have
+ *  that edit overwritten by the stored value, silently. Re-filling a single task stays
+ *  available as a per-card action, where the operator is choosing it deliberately.
+ */
+export function tasksReadyToFill(state: ActiveSession): TaskRef[] {
+  const tabbed = new Set(Object.values(state.tabMap));
+  return taskRefs(state).filter(
+    (t) => RELEASED_STATES.has(t.uiState) && t.uiState !== "filled" && tabbed.has(t.taskId),
+  );
+}
+
 export function tasksNeedingTabs(state: ActiveSession): TaskRef[] {
   const withTabs = new Set(Object.values(state.tabMap));
   return taskRefs(state).filter(

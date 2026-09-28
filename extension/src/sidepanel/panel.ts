@@ -23,6 +23,7 @@ import type {
 } from "../lib/messages";
 import {
   type ActiveSession,
+  type FillAllSummary,
   isFallbackOpen,
   openUrlFor,
   sessionKind,
@@ -845,6 +846,52 @@ function renderSession(state: ActiveSession): void {
         Object.entries(counts).map(([s, n]) => `${n} ${STATE_LABEL[s] ?? s}`).join(" · "),
     }),
   );
+
+  // FILL EVERY OPEN DIRECTORY, from here, without touching a tab.
+  //
+  // The tabs are already open and each already knows its task, so the old flow - focus a
+  // tab, press Fill, read it, move on, ten times - was the operator hand-running a loop.
+  // This runs it. Submitting stays per-card and by hand: a fill is local and reversible,
+  // a submission is a public listing under the client's name that cannot be recalled.
+  if (!web2) {
+    const fillAll = el("button", { className: "primary", textContent: "Fill all open directories" });
+    const report = el("div", { className: "note" });
+    report.style.display = "none";
+    fillAll.onclick = async () => {
+      fillAll.disabled = true;
+      const label = fillAll.textContent;
+      fillAll.textContent = "Filling…";
+      report.style.display = "";
+      report.replaceChildren(el("span", { className: "muted", textContent: "Working through the open tabs…" }));
+      const res = await send({ type: "fillAllTasks" });
+      fillAll.disabled = false;
+      fillAll.textContent = label;
+      if (!res.ok) { renderError(res); return; }
+      const sum = res.data as FillAllSummary;
+      report.replaceChildren();
+      if (sum.attempted === 0) {
+        report.append(el("span", { className: "muted", textContent: "No open directory needed filling." }));
+        return;
+      }
+      report.append(el("b", {
+        textContent: `${sum.succeeded} of ${sum.attempted} filled` +
+          (sum.needsAttention ? ` · ${sum.needsAttention} need a hand` : ""),
+      }));
+      // Per directory, because "3 need a hand" without naming them is not actionable.
+      for (const item of sum.items) {
+        const bad = item.error !== "" || item.filled === 0;
+        report.append(el("div", {
+          className: bad ? "note bad" : "note",
+          textContent: item.error
+            ? `${item.name}: ${item.error}`
+            : `${item.name}: ${item.filled} filled${item.failed ? `, ${item.failed} rejected` : ""}`,
+        }));
+      }
+      // The cards carry the new per-task states; re-read so the board agrees with this.
+      void refreshSessionView();
+    };
+    root.append(fillAll, report);
+  }
 
   if (web2) {
     for (const task of web2Tasks.filter((t) => t.batchNo === state.currentBatch)) {

@@ -188,6 +188,10 @@ export type PanelRequest =
   | { type: "fillTaskAi"; taskId: string }
   // One-click: open the add-form tab, wait for it to load, then autofill it.
   | { type: "openAndAutofill"; taskId: string }
+  // ONE BUTTON, EVERY OPEN DIRECTORY. Fills each released task in ITS OWN tab, so the
+  // operator never changes tab to fill. Submitting stays one-by-one and by hand - see
+  // `fillAllTasks` in the worker for why that line is drawn where it is.
+  | { type: "fillAllTasks"; mode?: "heuristic" | "ai" }
   | { type: "markSubmitted"; taskId: string; liveUrl: string; note: string; operatorConfirmed?: boolean }
   // Web2 placement completion (0136): the operator published in their own session
   // and pastes the public URL; the SERVER verifies host + link before anything moves.

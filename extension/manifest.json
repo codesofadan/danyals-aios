@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "AIOS Extension",
   "version": "0.1.0",
-  "description": "Two operator lanes: directory citations (fill a listing form from the canonical business profile) and Web 2.0 placements (publish an approved draft in your own account). Records what actually happened; never submits for you.",
+  "description": "Two operator lanes: directory citations (fill every open listing form from the canonical business profile, one click, without changing tab) and Web 2.0 placements (publish an approved draft in your own account). Records what actually happened; never submits for you.",
   "minimum_chrome_version": "114",
   "background": {
     "service_worker": "service-worker.js",
