@@ -332,7 +332,7 @@ def test_factory_builds_the_bundle_once_the_research_key_lands(
     assert isinstance(bundle.images, FakeImageGenerator)
     assert isinstance(bundle.wordpress, FakeWordPressPublisher)
     assert bundle.model_writer == "claude-haiku-4-5"
-    assert bundle.model_heavy == "claude-sonnet-5"
+    assert bundle.model_heavy == "claude-haiku-4-5"
     assert bundle.research_cost_estimate == pytest.approx(0.01)
     assert bundle.generate_cost_estimate == pytest.approx(0.15)
 
@@ -374,7 +374,7 @@ def test_factory_selects_real_enrichment_with_keys(monkeypatch: pytest.MonkeyPat
     assert built["writer"] == {
         "api_key": "ak",
         "model_summary": "claude-haiku-4-5",
-        "model_heavy": "claude-sonnet-5",
+        "model_heavy": "claude-haiku-4-5",
     }
     assert built["serp"] == {"api_key": "sk"}
     # image_host is the decoded-b64 hosting seam; None here (no artifact root configured

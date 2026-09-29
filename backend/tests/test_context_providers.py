@@ -186,13 +186,13 @@ def test_factory_selects_real_impls_without_network(monkeypatch: pytest.MonkeyPa
     assert bundle.embedder == "EMBEDDER"
     assert bundle.vector_store == "VECTORSTORE"
     assert bundle.model_summary == "claude-haiku-4-5"
-    assert bundle.model_heavy == "claude-sonnet-5"
+    assert bundle.model_heavy == "claude-haiku-4-5"
     assert bundle.topk == 9
     # Secrets are passed through decrypted to the SDK clients only, never logged.
     assert built["summarizer"] == {
         "api_key": "ak",
         "model_summary": "claude-haiku-4-5",
-        "model_heavy": "claude-sonnet-5",
+        "model_heavy": "claude-haiku-4-5",
     }
     assert built["embedder"] == {"api_key": "ek", "model": "voyage-3", "dim": 1024}
     assert built["vector_store"] == {"api_key": "pk", "index": "my-index", "host": "my-host"}
